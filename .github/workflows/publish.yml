@@ -1,0 +1,63 @@
+name: Build archived firmware and publish installer
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: archive-pages-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Verify original snapshots and run host tests
+        run: python scripts/host_tests.py
+      - name: Install PlatformIO
+        run: python -m pip install platformio==6.1.19
+      - name: Build both boards for both days
+        run: |
+          for day in day1 day2; do
+            for node in control communication; do
+              python -m platformio run -d "$day/$node" -e production
+            done
+          done
+      - name: Create installer and program-only ZIPs
+        run: python scripts/build_site.py
+      - name: Preserve build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: boat-programs-and-installer
+          path: site/
+          if-no-files-found: error
+      - name: Configure Pages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+      - name: Upload Pages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site/
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy installer
+        id: deployment
+        uses: actions/deploy-pages@v4
