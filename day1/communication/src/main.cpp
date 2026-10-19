@@ -9,6 +9,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,6 +17,8 @@
 #include "fixed_waypoints.h"
 #include "gnss_receiver.h"
 #include "production_page_ja.h"
+#include "track_page_ja.h"
+#include "sensors_page_ja.h"
 #include <boat_protocol.h>
 
 using namespace app_config;
@@ -37,6 +40,7 @@ constexpr size_t kRxChunkBytes = 512;
 enum class Stage : uint8_t {
   Idle,
   EnsureDisarmed,
+  WaitTuningAck,
   WaitWaypointAck,
   WaitModeAck,
   WaitManualAck,
@@ -54,12 +58,16 @@ struct LinkCache {
   boat::ControlOutputPayload output{};
   boat::ActuatorStatePayload actuators{};
   boat::SystemHealthPayload health{};
+  boat::InaStatusPayload ina{};
+  boat::VescTelemetryPayload vesc{};
   boat::ControlCommandAckPayload commandAck{};
   boat::WaypointAckPayload waypointAck{};
   uint64_t lastFrameUs = 0;
   uint64_t lastSnapshotUs = 0;
   uint64_t lastOutputUs = 0;
   uint64_t lastActuatorUs = 0;
+  uint64_t lastInaStatusUs = 0;
+  uint64_t lastVescTelemetryUs = 0;
   uint64_t lastAckUs = 0;
   uint64_t lastWaypointAckUs = 0;
   uint32_t frames = 0;
@@ -68,6 +76,8 @@ struct LinkCache {
   bool hasOutput = false;
   bool hasActuators = false;
   bool hasHealth = false;
+  bool hasIna = false;
+  bool hasVesc = false;
   bool hasCommandAck = false;
   bool hasWaypointAck = false;
   bool sawFinalWaypoint = false;
@@ -96,9 +106,46 @@ struct OperationConfig {
   bool waypointEnabled = false;
   bool attitudeEnabled = false;
   bool competitionCourse = false;
+  bool placedWaypoints = false;
   uint8_t targetIndex = 0;
   uint8_t mode = boat::ControlManual;
 };
+
+struct TrackPoint {
+  int32_t latitudeE7 = 0, longitudeE7 = 0;
+  uint32_t capturedMs = 0;
+};
+
+
+struct RuntimeTuningValues {
+  float kpPitch = 0.80f, kdPitch = 0.10f, kpRoll = 1.25f, kdRoll = 0.22f,
+        pitchCommandCutoffHz = 0.0f, rollCommandCutoffHz = 0.0f, heightCommandCutoffHz = 0.0f,
+        yawCommandCutoffHz = 0.0f, kpHeight = 0.75f, kpYaw = 0.90f, kdYaw = 0.12f,
+        targetHeightM = 0.45f, maxDuty = 0.50f, vescRampRiseSeconds = 2.0f;
+  float leftUpDeg = 105.0f, leftMiddleDeg = 90.0f, leftDownDeg = 75.0f;
+  float rightUpDeg = 75.0f, rightMiddleDeg = 90.0f, rightDownDeg = 105.0f;
+  float rearLeftDeg = 70.0f, rearMiddleDeg = 90.0f, rearRightDeg = 110.0f;
+};
+
+// BOATLOG1 is a compact, little-endian binary stream.  Quantized values keep
+// each 1 Hz sample to 40 bytes (about 3.5 MB/day) without JSON/CSV overhead.
+struct __attribute__((packed)) SdLogHeader {
+  char magic[8] = {'B', 'O', 'A', 'T', 'L', 'O', 'G', '1'};
+  uint16_t version = 1, recordBytes = 40;
+  uint32_t bootId = 0, startMillis = 0;
+};
+
+struct __attribute__((packed)) SdLogRecord {
+  uint32_t uptimeMs = 0;
+  int32_t latitudeE7 = 0, longitudeE7 = 0, vescErpm = 0;
+  int16_t speedCmPerS = 0, rollMilliRad = 0, pitchMilliRad = 0, tofMm = 0, leftMilli = 0,
+          rightMilli = 0, rearMilli = 0, targetDutyTenThousandth = 0, appliedDutyTenThousandth = 0;
+  uint16_t waypointDistanceCm = 0;
+  uint8_t safety = 0, mode = 0, yawCriteria = 0, flags = 0;
+};
+
+static_assert(sizeof(SdLogHeader) == 20, "SD log header size");
+static_assert(sizeof(SdLogRecord) == 40, "SD log record size");
 
 HardwareSerial controlUart(1), gnssUart(2);
 gnss::Receiver gnssRx;
@@ -128,12 +175,24 @@ uint32_t gnssSentences = 0;
 uint32_t gnssChecksumErrors = 0;
 bool gnssNewFix = false;
 bool sdReady = false;
+bool sdLoggingEnabled = false;
+File sdLogFile;
+char sdLogPath[24] = "";
+uint32_t lastSdLogMs = 0, sdLogRecords = 0, sdLogErrors = 0;
+uint16_t sdLogSession = 0;
+TrackPoint trackHistory[kTrackHistoryCapacity]{};
+boat::WaypointGeo placedWaypoints[16]{};
+uint16_t trackHistoryHead = 0, trackHistoryCount = 0;
+uint8_t placedWaypointCount = 0;
+uint32_t trackLastSampleMs = 0, trackRevision = 1;
 
 Stage stage = Stage::Idle;
 PendingCommand pending{};
 uint32_t stageStartedMs = 0;
 ManualValues manualValues{};
 OperationConfig operation{};
+RuntimeTuningValues runtimeTuning{};
+bool tuningOnlyPending = false;
 char operationMessage[96] = "停止中です。";
 
 uint64_t nowUs() {
@@ -153,6 +212,8 @@ const char *stageName(Stage value) {
     return "idle";
   case Stage::EnsureDisarmed:
     return "ensure_disarmed";
+  case Stage::WaitTuningAck:
+    return "wait_tuning_ack";
   case Stage::WaitWaypointAck:
     return "wait_waypoint_ack";
   case Stage::WaitModeAck:
@@ -483,25 +544,35 @@ void beginModeCommand() {
 
 void beginWaypointCommand() {
   const fixed_waypoints::Point *point = fixed_waypoints::byIndex(operation.targetIndex);
-  if (!operation.competitionCourse && !point) {
+  if (!operation.competitionCourse && !operation.placedWaypoints && !point) {
     pending.active = false;
     setMessage("固定ウェイポイントの選択が不正です。");
+    return;
+  }
+  if (operation.placedWaypoints && !placedWaypointCount) {
+    pending.active = false;
+    setMessage("配置したウェイポイントがありません。");
     return;
   }
   boat::WaypointSetPayload command{};
   command.requestId = requestIdNext++;
   command.revision = waypointRevisionNext++;
-  command.action = 1;
+  command.action = (operation.competitionCourse || operation.placedWaypoints) ? 2 : 1;
   command.count = operation.competitionCourse
                       ? static_cast<uint8_t>(fixed_waypoints::kCompetitionRouteCount)
-                      : 1;
+                      : (operation.placedWaypoints ? placedWaypointCount : 1);
   command.reachRadiusM = kWaypointReachRadiusM;
   for (uint8_t i = 0; i < command.count; ++i) {
-    const auto *source = operation.competitionCourse
-                             ? fixed_waypoints::byIndex(fixed_waypoints::kCompetitionRouteIndices[i])
-                             : point;
-    command.points[i].latitudeDeg = source->latitudeDeg;
-    command.points[i].longitudeDeg = source->longitudeDeg;
+    if (operation.placedWaypoints)
+      command.points[i] = placedWaypoints[i];
+    else {
+      const fixed_waypoints::Point *source =
+          operation.competitionCourse
+              ? fixed_waypoints::byIndex(fixed_waypoints::kCompetitionRouteIndices[i])
+              : point;
+      command.points[i].latitudeDeg = source->latitudeDeg;
+      command.points[i].longitudeDeg = source->longitudeDeg;
+    }
   }
   command.canonicalCrc =
       boat::canonicalCrc(&command, offsetof(boat::WaypointSetPayload, canonicalCrc));
@@ -512,6 +583,181 @@ void beginWaypointCommand() {
 void beginManualCommand() {
   const boat::ManualCommandPayload command = makeManual(kAllManualMask, manualValues);
   beginPending(boat::Type::ManualCommand,
+               &command,
+               sizeof(command),
+               command.requestId,
+               command.commandSequence);
+}
+
+int16_t logI16(float value, float scale) {
+  if (!isfinite(value))
+    return 0;
+  const float scaled = value * scale;
+  return scaled < -32768.0f ? -32768
+                            : (scaled > 32767.0f ? 32767 : static_cast<int16_t>(lroundf(scaled)));
+}
+
+int32_t logI32(double value, double scale) {
+  if (!isfinite(value))
+    return 0;
+  const double scaled = value * scale;
+  return scaled < static_cast<double>(INT32_MIN)
+             ? INT32_MIN
+             : (scaled > static_cast<double>(INT32_MAX) ? INT32_MAX
+                                                        : static_cast<int32_t>(llround(scaled)));
+}
+
+uint16_t logU16(float value, float scale) {
+  if (!isfinite(value) || value <= 0.0f)
+    return 0;
+  const float scaled = value * scale;
+  return scaled >= 65535.0f ? 65535 : static_cast<uint16_t>(lroundf(scaled));
+}
+
+bool beginSdLog() {
+  if (!sdReady)
+    return false;
+  if (sdLoggingEnabled)
+    return true;
+  ++sdLogSession;
+  sdLogRecords = 0;
+  lastSdLogMs = 0;
+  snprintf(sdLogPath,
+           sizeof(sdLogPath),
+           "/BOAT_%08lX_%02u.BIN",
+           static_cast<unsigned long>(bootId),
+           static_cast<unsigned>(sdLogSession));
+  sdLogFile = SD.open(sdLogPath, FILE_WRITE);
+  if (!sdLogFile) {
+    ++sdLogErrors;
+    return false;
+  }
+  SdLogHeader header{};
+  header.bootId = bootId;
+  header.startMillis = millis();
+  if (sdLogFile.write(reinterpret_cast<const uint8_t *>(&header), sizeof(header)) !=
+      sizeof(header)) {
+    ++sdLogErrors;
+    sdLogFile.close();
+    return false;
+  }
+  sdLogFile.flush();
+  sdLoggingEnabled = true;
+  return true;
+}
+
+void stopSdLog() {
+  if (sdLogFile) {
+    sdLogFile.flush();
+    sdLogFile.close();
+  }
+  sdLoggingEnabled = false;
+}
+
+void serviceSdLog() {
+  if (!sdLoggingEnabled || !sdLogFile || millis() - lastSdLogMs < kSdLogIntervalMs)
+    return;
+  lastSdLogMs = millis();
+  const LinkCache cache = cacheSnapshot();
+  const auto &fix = gnssRx.latest();
+  SdLogRecord record{};
+  record.uptimeMs = lastSdLogMs;
+  record.latitudeE7 = logI32(fix.latitude, 1e7);
+  record.longitudeE7 = logI32(fix.longitude, 1e7);
+  record.speedCmPerS = logI16(fix.speedMps, 100.0f);
+  if (cache.hasSnapshot) {
+    const auto &s = cache.snapshot;
+    record.rollMilliRad = logI16(s.rollRad, 1000.0f);
+    record.pitchMilliRad = logI16(s.pitchRad, 1000.0f);
+    record.tofMm = logI16(s.tofFilteredM, 1000.0f);
+    record.leftMilli = logI16(s.leftFrontWing, 1000.0f);
+    record.rightMilli = logI16(s.rightFrontWing, 1000.0f);
+    record.rearMilli = logI16(s.rearYaw, 1000.0f);
+    record.vescErpm = logI32(s.vescErpm, 1.0);
+    record.safety = s.state;
+    record.mode = s.mode;
+    record.yawCriteria = s.yawCriteriaMask;
+    record.waypointDistanceCm = logU16(s.waypointDistanceM, 100.0f);
+    record.flags |= 16u | (s.gnssValid ? 1u : 0u) | (s.imuValid ? 2u : 0u) |
+                    (s.tofValid ? 4u : 0u) | (s.yawControlActive ? 8u : 0u);
+  }
+  if (cache.hasActuators) {
+    record.targetDutyTenThousandth = logI16(cache.actuators.targetDuty, 10000.0f);
+    record.appliedDutyTenThousandth = logI16(cache.actuators.appliedDuty, 10000.0f);
+  }
+  if (linkConnected(cache))
+    record.flags |= 32u;
+  if (sdLogFile.write(reinterpret_cast<const uint8_t *>(&record), sizeof(record)) !=
+      sizeof(record)) {
+    ++sdLogErrors;
+    stopSdLog();
+    return;
+  }
+  ++sdLogRecords;
+  if (sdLogRecords % kSdLogFlushEveryRecords == 0)
+    sdLogFile.flush();
+}
+
+void serviceTrack() {
+  if (!gnssFixFresh() ||
+      (trackLastSampleMs && millis() - trackLastSampleMs < kTrackCoarseIntervalMs))
+    return;
+  const auto &fix = gnssRx.latest();
+  if (!isfinite(fix.latitude) || !isfinite(fix.longitude) || fix.latitude < -90.0 ||
+      fix.latitude > 90.0 || fix.longitude < -180.0 || fix.longitude > 180.0)
+    return;
+  uint16_t slot = 0;
+  if (trackHistoryCount < kTrackHistoryCapacity) {
+    slot = static_cast<uint16_t>((trackHistoryHead + trackHistoryCount) % kTrackHistoryCapacity);
+    ++trackHistoryCount;
+  } else {
+    slot = trackHistoryHead;
+    trackHistoryHead = (trackHistoryHead + 1) % kTrackHistoryCapacity;
+  }
+  trackHistory[slot].latitudeE7 = logI32(fix.latitude, 1e7);
+  trackHistory[slot].longitudeE7 = logI32(fix.longitude, 1e7);
+  trackHistory[slot].capturedMs = millis();
+  trackLastSampleMs = millis();
+  ++trackRevision;
+}
+
+boat::RuntimeTuningCommandPayload makeTuningCommand(const RuntimeTuningValues &values) {
+  boat::RuntimeTuningCommandPayload command{};
+  command.protocolVersion = boat::kVersion;
+  command.requestId = requestIdNext++;
+  command.commandSequence = commandSequenceNext++;
+  command.sourceUs = nowUs();
+  command.kpPitch = values.kpPitch;
+  command.kdPitch = values.kdPitch;
+  command.kpRoll = values.kpRoll;
+  command.kdRoll = values.kdRoll;
+  command.pitchCommandCutoffHz = 0.0f; // Reserved ABI field; output LPF is absent.
+  command.rollCommandCutoffHz = 0.0f; // Reserved ABI field; output LPF is absent.
+  command.heightCommandCutoffHz = 0.0f; // Reserved ABI field; output LPF is absent.
+  command.yawCommandCutoffHz = 0.0f; // Reserved ABI field; output LPF is absent.
+  command.kpHeight = values.kpHeight;
+  command.kpYaw = values.kpYaw;
+  command.kdYaw = values.kdYaw;
+  command.targetHeightM = values.targetHeightM;
+  command.maxDuty = values.maxDuty;
+  command.vescRampRiseSeconds = values.vescRampRiseSeconds;
+  command.leftUpDeg = values.leftUpDeg;
+  command.leftMiddleDeg = values.leftMiddleDeg;
+  command.leftDownDeg = values.leftDownDeg;
+  command.rightUpDeg = values.rightUpDeg;
+  command.rightMiddleDeg = values.rightMiddleDeg;
+  command.rightDownDeg = values.rightDownDeg;
+  command.rearLeftDeg = values.rearLeftDeg;
+  command.rearMiddleDeg = values.rearMiddleDeg;
+  command.rearRightDeg = values.rearRightDeg;
+  command.canonicalCrc =
+      boat::canonicalCrc(&command, offsetof(boat::RuntimeTuningCommandPayload, canonicalCrc));
+  return command;
+}
+
+void beginTuningCommand() {
+  const boat::RuntimeTuningCommandPayload command = makeTuningCommand(runtimeTuning);
+  beginPending(boat::Type::RuntimeTuning,
                &command,
                sizeof(command),
                command.requestId,
@@ -646,13 +892,8 @@ void serviceOperation() {
     if (safety == 4) {
       failOperation("緊急停止中です。解除してから開始してください。");
     } else if (safety == 1) {
-      if (usesWaypoint()) {
-        beginWaypointCommand();
-        setStage(Stage::WaitWaypointAck, "固定ウェイポイントをXIAOへ設定しています。");
-      } else {
-        beginModeCommand();
-        setStage(Stage::WaitModeAck, "制御モードを設定しています。");
-      }
+      beginTuningCommand();
+      setStage(Stage::WaitTuningAck, "制御ゲイン・高さ・サーボ角をXIAOへ設定しています。");
     } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
       sendSafety(boat::Type::Stop);
       if (current - stageStartedMs > kSafetyTimeoutMs) {
@@ -660,6 +901,26 @@ void serviceOperation() {
       }
     }
     return;
+
+  case Stage::WaitTuningAck: {
+    const int result = servicePending(cache);
+    if (result > 0) {
+      if (tuningOnlyPending) {
+        tuningOnlyPending = false;
+        setStage(Stage::Idle, "調整値をXIAOへ適用しました。");
+      } else if (usesWaypoint()) {
+        beginWaypointCommand();
+        setStage(Stage::WaitWaypointAck, "固定ウェイポイントをXIAOへ設定しています。");
+      } else {
+        beginModeCommand();
+        setStage(Stage::WaitModeAck, "制御モードを設定しています。");
+      }
+    } else if (result < 0) {
+      tuningOnlyPending = false;
+      failOperation(operationMessage);
+    }
+    return;
+  }
 
   case Stage::WaitWaypointAck: {
     const int result = servicePending(cache);
@@ -710,7 +971,7 @@ void serviceOperation() {
     } else if (safety == 4) {
       failOperation("ARM中に緊急停止になりました。");
     } else if (current - stageStartedMs > kSafetyTimeoutMs) {
-      failOperation("ARMできませんでした。PCA9685と配線を確認してください。");
+      failOperation("ARMできませんでした。制御側の事前条件を確認してください。");
     } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
       sendSafety(boat::Type::Arm);
     }
@@ -739,7 +1000,7 @@ void serviceOperation() {
       keepManualFresh();
     if (usesWaypoint() && safety == 1 && cache.sawFinalWaypoint) {
       sendManualOff();
-      setStage(Stage::Idle, "設定した経路の最終ウェイポイントへ到着し、全出力を停止しました。");
+      setStage(Stage::Idle, "選択した固定ウェイポイントへ到着し、全出力を停止しました。");
     } else if (safety != 3) {
       failSafetyOperation(cache, "RUNNING");
     }
@@ -786,6 +1047,9 @@ void processFrame(const boat::Frame &frame) {
     memcpy(&linkCache.snapshot, frame.payload, sizeof(linkCache.snapshot));
     linkCache.lastSnapshotUs = receivedUs;
     linkCache.hasSnapshot = true;
+    if (linkCache.snapshot.tofValid &&
+        (linkCache.latchedStopReason == 7 || linkCache.latchedStopReason == 8))
+      linkCache.latchedStopReason = 0;
     if (linkCache.snapshot.safetyReason)
       linkCache.latchedStopReason = linkCache.snapshot.safetyReason;
   } else if (type == boat::Type::ControlOutput && frame.header.length == sizeof(linkCache.output)) {
@@ -806,6 +1070,14 @@ void processFrame(const boat::Frame &frame) {
     linkCache.hasHealth = true;
     if (linkCache.health.stopReason)
       linkCache.latchedStopReason = linkCache.health.stopReason;
+  } else if (type == boat::Type::InaStatus && frame.header.length == sizeof(linkCache.ina)) {
+    memcpy(&linkCache.ina, frame.payload, sizeof(linkCache.ina));
+    linkCache.lastInaStatusUs = receivedUs;
+    linkCache.hasIna = true;
+  } else if (type == boat::Type::VescTelemetry && frame.header.length == sizeof(linkCache.vesc)) {
+    memcpy(&linkCache.vesc, frame.payload, sizeof(linkCache.vesc));
+    linkCache.lastVescTelemetryUs = receivedUs;
+    linkCache.hasVesc = true;
   } else if (type == boat::Type::ControlCommandAck &&
              frame.header.length == sizeof(linkCache.commandAck)) {
     memcpy(&linkCache.commandAck, frame.payload, sizeof(linkCache.commandAck));
@@ -894,12 +1166,22 @@ bool parseOperationConfig(OperationConfig &config) {
   if (!parseBooleanArgument("waypoint", config.waypointEnabled) ||
       !parseBooleanArgument("attitude", config.attitudeEnabled))
     return false;
+  if (web.hasArg("competition_course") &&
+      !parseBooleanArgument("competition_course", config.competitionCourse))
+    return false;
   const String target = web.arg("target");
-  config.competitionCourse = target == "course";
-  if (config.competitionCourse) {
+  if (target == "placed") {
+    if (!placedWaypointCount)
+      return false;
+    config.placedWaypoints = true;
     config.targetIndex = 0;
     config.mode = selectedMode(config.waypointEnabled, config.attitudeEnabled);
     return true;
+  }
+  if (config.competitionCourse) {
+    config.targetIndex = 0;
+    config.mode = selectedMode(config.waypointEnabled, config.attitudeEnabled);
+    return target == "course";
   }
   char *end = nullptr;
   const long index = strtol(target.c_str(), &end, 10);
@@ -911,6 +1193,48 @@ bool parseOperationConfig(OperationConfig &config) {
   return true;
 }
 
+bool validRange(float value, float low, float high) {
+  return isfinite(value) && value >= low && value <= high;
+}
+
+bool validServoPositions(float negative, float center, float positive) {
+  return validRange(negative, 0.0f, 180.0f) && validRange(center, 0.0f, 180.0f) &&
+         validRange(positive, 0.0f, 180.0f);
+}
+
+bool parseRuntimeTuning(RuntimeTuningValues &v) {
+  v.pitchCommandCutoffHz = v.rollCommandCutoffHz = v.heightCommandCutoffHz = v.yawCommandCutoffHz = 0;
+  if (!parseFloatArgument("kp_pitch", v.kpPitch) || !parseFloatArgument("kd_pitch", v.kdPitch) ||
+      !parseFloatArgument("kp_roll", v.kpRoll) || !parseFloatArgument("kd_roll", v.kdRoll) ||
+      !parseFloatArgument("kp_height", v.kpHeight) || !parseFloatArgument("kp_yaw", v.kpYaw) ||
+      !parseFloatArgument("kd_yaw", v.kdYaw) ||
+      !parseFloatArgument("target_height", v.targetHeightM) ||
+      !parseFloatArgument("max_duty", v.maxDuty) ||
+      !parseFloatArgument("vesc_ramp_rise_s", v.vescRampRiseSeconds) ||
+      !parseFloatArgument("left_up", v.leftUpDeg) ||
+      !parseFloatArgument("left_middle", v.leftMiddleDeg) ||
+      !parseFloatArgument("left_down", v.leftDownDeg) ||
+      !parseFloatArgument("right_up", v.rightUpDeg) ||
+      !parseFloatArgument("right_middle", v.rightMiddleDeg) ||
+      !parseFloatArgument("right_down", v.rightDownDeg) ||
+      !parseFloatArgument("rear_left", v.rearLeftDeg) ||
+      !parseFloatArgument("rear_middle", v.rearMiddleDeg) ||
+      !parseFloatArgument("rear_right", v.rearRightDeg))
+    return false;
+  return validRange(v.kpPitch, 0.0f, 10.0f) && validRange(v.kdPitch, 0.0f, 5.0f) &&
+         validRange(v.kpRoll, 0.0f, 10.0f) && validRange(v.kdRoll, 0.0f, 5.0f) &&
+         validRange(v.pitchCommandCutoffHz, 0.0f, 10.0f) &&
+         validRange(v.rollCommandCutoffHz, 0.0f, 10.0f) &&
+         validRange(v.heightCommandCutoffHz, 0.0f, 10.0f) &&
+         validRange(v.kpHeight, 0.0f, 10.0f) &&
+         validRange(v.kpYaw, 0.0f, 10.0f) && validRange(v.kdYaw, 0.0f, 5.0f) &&
+         validRange(v.targetHeightM, 0.10f, 2.00f) && validRange(v.maxDuty, 0.0f, 1.00f) &&
+         validRange(v.vescRampRiseSeconds, 0.10f, 20.0f) &&
+         validServoPositions(v.leftUpDeg, v.leftMiddleDeg, v.leftDownDeg) &&
+         validServoPositions(v.rightUpDeg, v.rightMiddleDeg, v.rightDownDeg) &&
+         validServoPositions(v.rearLeftDeg, v.rearMiddleDeg, v.rearRightDeg);
+}
+
 void sendJsonResult(int code, bool accepted, const char *message) {
   char body[180];
   snprintf(body,
@@ -919,6 +1243,230 @@ void sendJsonResult(int code, bool accepted, const char *message) {
            accepted ? "true" : "false",
            message);
   web.send(code, "application/json; charset=utf-8", body);
+}
+
+void apiTuningGet() {
+  char body[1000];
+  snprintf(
+      body,
+      sizeof(body),
+      "{\"kp_pitch\":%.4f,\"kd_pitch\":%.4f,\"kp_roll\":%.4f,\"kd_roll\":%.4f,\"kp_height\":%.4f,\"kp_yaw\":%.4f,\"kd_yaw\":%.4f,\"target_height\":%.4f,\"max_duty\":%.4f,\"vesc_ramp_rise_s\":%.4f,\"left\":{\"up\":%.2f,\"middle\":%.2f,\"down\":%.2f},\"right\":{\"up\":%.2f,\"middle\":%.2f,\"down\":%.2f},\"rear\":{\"left\":%.2f,\"middle\":%.2f,\"right\":%.2f},\"persistent\":false}",
+      runtimeTuning.kpPitch,
+      runtimeTuning.kdPitch,
+      runtimeTuning.kpRoll,
+      runtimeTuning.kdRoll,
+      runtimeTuning.kpHeight,
+      runtimeTuning.kpYaw,
+      runtimeTuning.kdYaw,
+      runtimeTuning.targetHeightM,
+      runtimeTuning.maxDuty,
+      runtimeTuning.vescRampRiseSeconds,
+      runtimeTuning.leftUpDeg,
+      runtimeTuning.leftMiddleDeg,
+      runtimeTuning.leftDownDeg,
+      runtimeTuning.rightUpDeg,
+      runtimeTuning.rightMiddleDeg,
+      runtimeTuning.rightDownDeg,
+      runtimeTuning.rearLeftDeg,
+      runtimeTuning.rearMiddleDeg,
+      runtimeTuning.rearRightDeg);
+  web.send(200, "application/json; charset=utf-8", body);
+}
+
+void apiTuningPost() {
+  RuntimeTuningValues requested{};
+  if (!parseRuntimeTuning(requested)) {
+    sendJsonResult(400, false, "調整値が範囲外、または最小＜中立＜最大になっていません。");
+    return;
+  }
+  const LinkCache cache = cacheSnapshot();
+  if (!linkConnected(cache)) {
+    sendJsonResult(503, false, "XIAOと通信できていません。");
+    return;
+  }
+  if (stage != Stage::Idle && stage != Stage::Error) {
+    sendJsonResult(409, false, "停止中だけ調整値を変更できます。");
+    return;
+  }
+  if (currentSafety(cache) != 1) {
+    sendJsonResult(409, false, "制御側XIAOをDISARMEDにしてから変更してください。");
+    return;
+  }
+  runtimeTuning = requested;
+  tuningOnlyPending = true;
+  pending.active = false;
+  beginTuningCommand();
+  setStage(Stage::WaitTuningAck, "調整値をXIAOへ適用しています。");
+  sendJsonResult(202, true, "調整値を送信しました。XIAOのACKを確認します。");
+}
+
+void apiLoggingPost() {
+  if (!web.hasArg("enabled")) {
+    sendJsonResult(400, false, "記録のON/OFF指定がありません。");
+    return;
+  }
+  const String value = web.arg("enabled");
+  if (value == "1" || value == "true") {
+    if (!sdReady) {
+      sendJsonResult(409, false, "SDカードを認識できていません。");
+      return;
+    }
+    if (!beginSdLog()) {
+      sendJsonResult(500, false, "SDログファイルを作成できません。");
+      return;
+    }
+    sendJsonResult(200, true, "SD記録を開始しました。");
+  } else if (value == "0" || value == "false") {
+    stopSdLog();
+    sendJsonResult(200, true, "SD記録を停止しました。");
+  } else
+    sendJsonResult(400, false, "記録のON/OFF指定が不正です。");
+}
+
+bool parseDoubleArgument(const char *name, double &value) {
+  const String source = web.arg(name);
+  if (!source.length())
+    return false;
+  char *end = nullptr;
+  value = strtod(source.c_str(), &end);
+  return end && *end == 0 && isfinite(value);
+}
+
+bool appendTrackJson(char *body, size_t capacity, size_t &used, const char *format, ...) {
+  if (used >= capacity)
+    return false;
+  va_list arguments;
+  va_start(arguments, format);
+  const int written = vsnprintf(body + used, capacity - used, format, arguments);
+  va_end(arguments);
+  if (written < 0 || static_cast<size_t>(written) >= capacity - used)
+    return false;
+  used += static_cast<size_t>(written);
+  return true;
+}
+
+void apiTrackGet() {
+  static char body[9216];
+  uint32_t since = 0;
+  if (web.hasArg("since")) {
+    char *end = nullptr;
+    since = strtoul(web.arg("since").c_str(), &end, 10);
+    if (!end || *end)
+      since = 0;
+  }
+  const bool changed = !web.hasArg("since") || since != trackRevision;
+  size_t used = 0;
+  bool ok = appendTrackJson(body,
+                            sizeof(body),
+                            used,
+                            "{\"revision\":%lu,\"changed\":%s,\"history\":[",
+                            static_cast<unsigned long>(trackRevision),
+                            changed ? "true" : "false");
+  if (changed)
+    for (uint16_t i = 0; i < trackHistoryCount && ok; ++i) {
+      const TrackPoint &p = trackHistory[(trackHistoryHead + i) % kTrackHistoryCapacity];
+      ok = appendTrackJson(body,
+                           sizeof(body),
+                           used,
+                           "%s[%.7f,%.7f]",
+                           i ? "," : "",
+                           static_cast<double>(p.latitudeE7) / 1e7,
+                           static_cast<double>(p.longitudeE7) / 1e7);
+    }
+  ok = ok && appendTrackJson(body, sizeof(body), used, "],\"waypoints\":");
+  if (changed) {
+    ok = ok && appendTrackJson(body, sizeof(body), used, "[");
+    for (uint8_t i = 0; i < placedWaypointCount && ok; ++i)
+      ok = appendTrackJson(body,
+                           sizeof(body),
+                           used,
+                           "%s[%.7f,%.7f]",
+                           i ? "," : "",
+                           placedWaypoints[i].latitudeDeg,
+                           placedWaypoints[i].longitudeDeg);
+    ok = ok && appendTrackJson(body, sizeof(body), used, "]");
+  } else
+    ok = ok && appendTrackJson(body, sizeof(body), used, "null");
+  const auto &fix = gnssRx.latest();
+  const LinkCache control = cacheSnapshot();
+  const bool courseValid = control.hasSnapshot && control.snapshot.gnssValid &&
+                           ageMs(control.lastSnapshotUs, nowUs()) <= 3000UL &&
+                           isfinite(control.snapshot.gnssCourseRad);
+  ok = ok && appendTrackJson(body, sizeof(body), used, ",\"current\":");
+  if (gnssFixFresh()) {
+    if (courseValid)
+      ok = ok && appendTrackJson(body,
+                                 sizeof(body),
+                                 used,
+                                 "[%.7f,%.7f,%.5f]",
+                                 fix.latitude,
+                                 fix.longitude,
+                                 control.snapshot.gnssCourseRad);
+    else
+      ok = ok && appendTrackJson(
+                     body, sizeof(body), used, "[%.7f,%.7f,null]", fix.latitude, fix.longitude);
+  } else
+    ok = ok && appendTrackJson(body, sizeof(body), used, "null");
+  ok = ok &&
+       appendTrackJson(body, sizeof(body), used, " ,\"local_radius_m\":%.0f}", kTrackLocalRadiusM);
+  if (!ok) {
+    web.send(500, "application/json; charset=utf-8", "{\"error\":\"track_too_large\"}");
+    return;
+  }
+  web.send(200, "application/json; charset=utf-8", body);
+}
+
+void apiTrackReset() {
+  trackHistoryHead = 0;
+  trackHistoryCount = 0;
+  trackLastSampleMs = 0;
+  ++trackRevision;
+  sendJsonResult(200, true, "航跡をリセットしました。ウェイポイントは残しています。");
+}
+
+void apiTrackWaypointsPost() {
+  if (stage != Stage::Idle && stage != Stage::Error) {
+    sendJsonResult(409, false, "制御中はウェイポイントを変更できません。");
+    return;
+  }
+  const String action = web.arg("action");
+  if (action == "add") {
+    double latitude = 0, longitude = 0;
+    if (!parseDoubleArgument("lat", latitude) || !parseDoubleArgument("lon", longitude) ||
+        latitude < -90.0 || latitude > 90.0 || longitude < -180.0 || longitude > 180.0) {
+      sendJsonResult(400, false, "緯度または経度が不正です。");
+      return;
+    }
+    if (placedWaypointCount >= 16) {
+      sendJsonResult(409, false, "ウェイポイントは16点までです。");
+      return;
+    }
+    placedWaypoints[placedWaypointCount++] = {latitude, longitude};
+    ++trackRevision;
+    sendJsonResult(200, true, "ウェイポイントを追加しました。");
+    return;
+  }
+  if (action == "delete") {
+    char *end = nullptr;
+    const long index = strtol(web.arg("index").c_str(), &end, 10);
+    if (!end || *end || index < 0 || index >= placedWaypointCount) {
+      sendJsonResult(400, false, "削除するウェイポイントが不正です。");
+      return;
+    }
+    for (uint8_t i = static_cast<uint8_t>(index); i + 1 < placedWaypointCount; ++i)
+      placedWaypoints[i] = placedWaypoints[i + 1];
+    --placedWaypointCount;
+    ++trackRevision;
+    sendJsonResult(200, true, "ウェイポイントを削除しました。");
+    return;
+  }
+  if (action == "clear") {
+    placedWaypointCount = 0;
+    ++trackRevision;
+    sendJsonResult(200, true, "全ウェイポイントを削除しました。");
+    return;
+  }
+  sendJsonResult(400, false, "ウェイポイント操作が不正です。");
 }
 
 void apiStart() {
@@ -937,10 +1485,6 @@ void apiStart() {
     sendJsonResult(503, false, "XIAOと通信できていません。");
     return;
   }
-  if (!cache.hasActuators || !cache.actuators.pcaReady) {
-    sendJsonResult(409, false, "PCA9685が準備できていません。");
-    return;
-  }
   if (currentSafety(cache) == 4) {
     sendJsonResult(409, false, "緊急停止を解除してください。");
     return;
@@ -948,12 +1492,7 @@ void apiStart() {
   if ((requested.attitudeEnabled || requested.waypointEnabled) &&
       (!cache.hasSnapshot || ageMs(cache.lastSnapshotUs, nowUs()) > kLinkFreshMs ||
        !cache.snapshot.imuValid)) {
-    sendJsonResult(409, false, "姿勢または航法制御に必要なBNO08Xが有効ではありません。");
-    return;
-  }
-  if (requested.waypointEnabled &&
-      (!gnssFixFresh() || !cache.hasSnapshot || !cache.snapshot.gnssValid)) {
-    sendJsonResult(409, false, "通信側と制御側の両方で有効なGNSS測位を確認できません。");
+    sendJsonResult(409, false, "姿勢補助または航行の方向制御に必要なBNO08Xが有効ではありません。");
     return;
   }
   if (stage != Stage::Idle && stage != Stage::Error) {
@@ -962,6 +1501,7 @@ void apiStart() {
   }
   manualValues = values;
   operation = requested;
+  tuningOnlyPending = false;
   pending.active = false;
   lastManualMs = 0;
   portENTER_CRITICAL(&cacheMux);
@@ -1021,95 +1561,202 @@ void apiClearEstop() {
   sendJsonResult(202, true, "緊急停止解除指令を送りました。");
 }
 
+float sensorDisplayValue(float value) {
+  return isfinite(value) ? value : 0.0f;
+}
+
+void apiSensors() {
+  const LinkCache cache = cacheSnapshot();
+  const uint64_t currentUs = nowUs();
+  const auto &fix = gnssRx.latest();
+  const bool connected = linkConnected(cache);
+  const bool imuValid = cache.hasSnapshot && cache.snapshot.imuValid;
+  const bool tofValid = cache.hasSnapshot && cache.snapshot.tofValid;
+  const bool gnssValid = gnssFixFresh();
+  const bool inaDetected = cache.hasHealth && (cache.health.flags & 64u);
+  const bool inaValid = cache.hasIna && cache.ina.valid && cache.ina.ageUs <= 200000UL &&
+                        ageMs(cache.lastInaStatusUs, currentUs) <= 1500UL;
+  const bool vescValid = cache.hasVesc && cache.vesc.valid && cache.vesc.ageUs <= 300000UL &&
+                         ageMs(cache.lastVescTelemetryUs, currentUs) <= 1500UL;
+  char body[2200];
+  snprintf(
+      body,
+      sizeof(body),
+      "{\"connected\":%s,\"imu\":{\"valid\":%s,\"age_ms\":%lu,\"roll_deg\":%.2f,\"pitch_deg\":%.2f,\"yaw_deg\":%.2f,\"roll_rate_dps\":%.2f,\"pitch_rate_dps\":%.2f,\"yaw_rate_dps\":%.2f},"
+      "\"tof\":{\"valid\":%s,\"age_ms\":%lu,\"distance_m\":%.3f},"
+      "\"gnss\":{\"valid\":%s,\"age_ms\":%lu,\"latitude\":%.8f,\"longitude\":%.8f,\"speed_mps\":%.3f,\"satellites\":%u},"
+      "\"ina\":{\"detected\":%s,\"valid\":%s,\"age_ms\":%lu,\"bus_v\":%.3f,\"shunt_v\":%.5f,\"current_a\":%.3f,\"power_w\":%.3f},"
+      "\"vesc\":{\"valid\":%s,\"age_ms\":%lu,\"input_v\":%.3f,\"motor_current_a\":%.3f,\"input_current_a\":%.3f,\"duty\":%.4f,\"erpm\":%.1f,\"mos_temp_c\":%.1f,\"motor_temp_c\":%.1f,\"fault\":%u}}",
+      connected ? "true" : "false",
+      imuValid ? "true" : "false",
+      static_cast<unsigned long>(cache.hasSnapshot ? cache.snapshot.imuAgeUs / 1000UL : UINT32_MAX),
+      sensorDisplayValue(cache.snapshot.rollRad * 57.2957795f),
+      sensorDisplayValue(cache.snapshot.pitchRad * 57.2957795f),
+      sensorDisplayValue(cache.snapshot.yawRad * 57.2957795f),
+      sensorDisplayValue(cache.snapshot.rollRateRadS * 57.2957795f),
+      sensorDisplayValue(cache.snapshot.pitchRateRadS * 57.2957795f),
+      sensorDisplayValue(cache.snapshot.yawRateRadS * 57.2957795f),
+      tofValid ? "true" : "false",
+      static_cast<unsigned long>(cache.hasSnapshot ? cache.snapshot.tofAgeUs / 1000UL : UINT32_MAX),
+      sensorDisplayValue(cache.snapshot.tofFilteredM),
+      gnssValid ? "true" : "false",
+      static_cast<unsigned long>(ageMs(fix.lastValidFixUs, currentUs)),
+      fix.latitude,
+      fix.longitude,
+      sensorDisplayValue(fix.speedMps),
+      static_cast<unsigned>(fix.satellites),
+      inaDetected ? "true" : "false",
+      inaValid ? "true" : "false",
+      static_cast<unsigned long>(cache.hasIna ? ageMs(cache.lastInaStatusUs, currentUs)
+                                              : UINT32_MAX),
+      sensorDisplayValue(cache.ina.busVoltageV),
+      sensorDisplayValue(cache.ina.shuntVoltageV),
+      sensorDisplayValue(cache.ina.currentA),
+      sensorDisplayValue(cache.ina.powerW),
+      vescValid ? "true" : "false",
+      static_cast<unsigned long>(cache.hasVesc ? ageMs(cache.lastVescTelemetryUs, currentUs)
+                                               : UINT32_MAX),
+      sensorDisplayValue(cache.vesc.inputVoltageV),
+      sensorDisplayValue(cache.vesc.motorCurrentA),
+      sensorDisplayValue(cache.vesc.inputCurrentA),
+      sensorDisplayValue(cache.vesc.duty),
+      sensorDisplayValue(cache.vesc.erpm),
+      sensorDisplayValue(cache.vesc.mosTempC),
+      sensorDisplayValue(cache.vesc.motorTempC),
+      static_cast<unsigned>(cache.vesc.fault));
+  web.send(200, "application/json; charset=utf-8", body);
+}
+
 void apiStatus() {
   const LinkCache cache = cacheSnapshot();
   const bool connected = linkConnected(cache);
   const uint32_t linkAge = ageMs(cache.lastFrameUs, nowUs());
   const uint8_t safety = currentSafety(cache);
   const auto &fix = gnssRx.latest();
+  const bool imuReady = cache.hasSnapshot && cache.snapshot.imuValid;
+  const bool tofReady = cache.hasSnapshot && cache.snapshot.tofValid;
+  const bool gnssCommunicationReady = gnssFixFresh();
+  const bool gnssControlReady = cache.hasSnapshot && cache.snapshot.gnssValid;
+  const bool powerReady = cache.hasHealth && (cache.health.flags & 8u);
+  const bool vescReady = cache.hasHealth && (cache.health.flags & 16u);
+  const bool inaReady = cache.hasHealth && (cache.health.flags & 64u);
   const fixed_waypoints::Point *target = fixed_waypoints::byIndex(operation.targetIndex);
-  char targetName[2] = {target ? target->name : '?', '\0'};
-  char body[2300];
-  snprintf(body,
-           sizeof(body),
-           "{\"connected\":%s,\"ever_received\":%s,\"age_ms\":%lu,"
-           "\"operation\":\"%s\",\"message\":\"%s\","
-           "\"selection\":{\"waypoint\":%s,\"attitude\":%s,\"target_index\":%u,"
-           "\"target_name\":\"%s\",\"competition_course\":%s,\"mode\":%u,\"mode_name\":\"%s\"},"
-           "\"manual\":{\"enabled_mask\":%u,\"left\":%.3f,\"right\":%.3f,"
-           "\"rear\":%.3f,\"propulsion\":%.3f},"
-           "\"gnss\":{\"communication_valid\":%s,\"control_valid\":%u,\"age_ms\":%lu,"
-           "\"latitude\":%.8f,\"longitude\":%.8f,\"speed_mps\":%.3f,"
-           "\"satellites\":%u,\"sentences\":%lu,\"checksum_errors\":%lu},"
-           "\"storage\":{\"sd_ready\":%s,\"logging_enabled\":false},"
-           "\"control\":{\"safety\":%u,\"safety_name\":\"%s\","
-           "\"mode\":%u,\"stop_reason\":%u,\"stop_reason_name\":\"%s\","
-           "\"waypoint_distance_m\":%.2f,\"active_waypoint\":%u,"
-           "\"target_latitude\":%.8f,\"target_longitude\":%.8f},"
-           "\"actuators\":{\"pca_ready\":%u,\"pwm_errors\":%lu,"
-           "\"outputs_enabled\":%u,\"enabled_mask\":%u,\"left_us\":%u,"
-           "\"right_us\":%u,\"rear_us\":%u,\"relay\":%u,"
-           "\"target_duty\":%.3f,\"applied_duty\":%.3f},"
-           "\"sensors\":{\"imu_valid\":%u,\"roll_rad\":%.4f,\"pitch_rad\":%.4f,"
-           "\"yaw_rad\":%.4f,\"tof_valid\":%u,\"tof_m\":%.3f},"
-           "\"link\":{\"frames\":%lu,\"crc_errors\":%lu,\"cobs_errors\":%lu,"
-           "\"length_errors\":%lu}}",
-           connected ? "true" : "false",
-           cache.lastFrameUs ? "true" : "false",
-           static_cast<unsigned long>(linkAge),
-           stageName(stage),
-           operationMessage,
-           operation.waypointEnabled ? "true" : "false",
-           operation.attitudeEnabled ? "true" : "false",
-           static_cast<unsigned>(operation.targetIndex),
-           operation.competitionCourse ? "COURSE" : targetName,
-           operation.competitionCourse ? "true" : "false",
-           static_cast<unsigned>(operation.mode),
-           modeName(operation.mode),
-           static_cast<unsigned>(kAllManualMask),
-           manualValues.left,
-           manualValues.right,
-           manualValues.rear,
-           manualValues.propulsion,
-           gnssFixFresh() ? "true" : "false",
-           static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.gnssValid : 0),
-           static_cast<unsigned long>(ageMs(fix.lastValidFixUs, nowUs())),
-           fix.latitude,
-           fix.longitude,
-           fix.speedMps,
-           static_cast<unsigned>(fix.satellites),
-           static_cast<unsigned long>(gnssSentences),
-           static_cast<unsigned long>(gnssChecksumErrors),
-           sdReady ? "true" : "false",
-           static_cast<unsigned>(safety),
-           safetyName(safety),
-           static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.mode : 0),
-           static_cast<unsigned>(currentStopReason(cache)),
-           stopReasonName(currentStopReason(cache)),
-           cache.hasSnapshot ? cache.snapshot.waypointDistanceM : 0.0f,
-           static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.activeWaypoint : 0),
-           cache.hasSnapshot ? cache.snapshot.targetWaypointLatitudeDeg : 0.0,
-           cache.hasSnapshot ? cache.snapshot.targetWaypointLongitudeDeg : 0.0,
-           static_cast<unsigned>(cache.hasActuators ? cache.actuators.pcaReady : 0),
-           static_cast<unsigned long>(cache.hasActuators ? cache.actuators.pwmErrors : 0),
-           static_cast<unsigned>(cache.hasActuators ? cache.actuators.outputsEnabled : 0),
-           static_cast<unsigned>(cache.hasActuators ? cache.actuators.enabledMask : 0),
-           static_cast<unsigned>(cache.hasActuators ? cache.actuators.leftPulseUs : 0),
-           static_cast<unsigned>(cache.hasActuators ? cache.actuators.rightPulseUs : 0),
-           static_cast<unsigned>(cache.hasActuators ? cache.actuators.rearPulseUs : 0),
-           static_cast<unsigned>(cache.hasActuators ? cache.actuators.motorRelayEnabled : 0),
-           cache.hasActuators ? cache.actuators.targetDuty : 0.0f,
-           cache.hasActuators ? cache.actuators.appliedDuty : 0.0f,
-           static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.imuValid : 0),
-           cache.hasSnapshot ? cache.snapshot.rollRad : 0.0f,
-           cache.hasSnapshot ? cache.snapshot.pitchRad : 0.0f,
-           cache.hasSnapshot ? cache.snapshot.yawRad : 0.0f,
-           static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.tofValid : 0),
-           cache.hasSnapshot ? cache.snapshot.tofFilteredM : 0.0f,
-           static_cast<unsigned long>(cache.frames),
-           static_cast<unsigned long>(crcErrors),
-           static_cast<unsigned long>(cobsErrors),
-           static_cast<unsigned long>(lengthErrors));
+  char targetName[8] = "?";
+  if (operation.competitionCourse)
+    strcpy(targetName, "COURSE");
+  else if (operation.placedWaypoints)
+    strcpy(targetName, "PLACED");
+  else if (target) {
+    targetName[0] = target->name;
+    targetName[1] = '\0';
+  }
+  char body[3000];
+  snprintf(
+      body,
+      sizeof(body),
+      "{\"connected\":%s,\"ever_received\":%s,\"age_ms\":%lu,"
+      "\"operation\":\"%s\",\"message\":\"%s\","
+      "\"selection\":{\"waypoint\":%s,\"attitude\":%s,\"competition_course\":%s,\"placed_waypoints\":%s,\"target_index\":%u,"
+      "\"target_name\":\"%s\",\"mode\":%u,\"mode_name\":\"%s\"},"
+      "\"manual\":{\"enabled_mask\":%u,\"left\":%.3f,\"right\":%.3f,"
+      "\"rear\":%.3f,\"propulsion\":%.3f},"
+      "\"gnss\":{\"communication_valid\":%s,\"control_valid\":%u,\"age_ms\":%lu,"
+      "\"latitude\":%.8f,\"longitude\":%.8f,\"speed_mps\":%.3f,"
+      "\"satellites\":%u,\"sentences\":%lu,\"checksum_errors\":%lu},"
+      "\"storage\":{\"sd_ready\":%s,\"logging_enabled\":%s,\"file\":\"%s\",\"records\":%lu,\"errors\":%lu},"
+      "\"preflight\":{\"control_link\":%s,\"pca\":%s,\"imu\":%s,\"tof\":%s,"
+      "\"gnss_communication\":%s,\"gnss_control\":%s,\"power\":%s,\"vesc\":%s,\"ina\":%s,"
+      "\"waypoint_required\":%s,\"attitude_required\":%s},"
+      "\"control\":{\"safety\":%u,\"safety_name\":\"%s\","
+      "\"mode\":%u,\"stop_reason\":%u,\"stop_reason_name\":\"%s\","
+      "\"waypoint_distance_m\":%.2f,\"active_waypoint\":%u,"
+      "\"target_latitude\":%.8f,\"target_longitude\":%.8f},"
+      "\"yaw\":{\"active\":%u,\"criteria_mask\":%u,\"vesc_low_erpm_warning\":%u,\"vesc_erpm\":%.1f},"
+      "\"actuators\":{\"pca_ready\":%u,\"pwm_errors\":%lu,"
+      "\"outputs_enabled\":%u,\"enabled_mask\":%u,\"left_us\":%u,"
+      "\"right_us\":%u,\"rear_us\":%u,\"relay\":%u,"
+      "\"target_duty\":%.3f,\"applied_duty\":%.3f},"
+      "\"sensors\":{\"imu_valid\":%u,\"roll_rad\":%.4f,\"pitch_rad\":%.4f,"
+      "\"yaw_rad\":%.4f,\"tof_valid\":%u,\"tof_m\":%.3f},"
+      "\"link\":{\"frames\":%lu,\"crc_errors\":%lu,\"cobs_errors\":%lu,"
+      "\"length_errors\":%lu}}",
+      connected ? "true" : "false",
+      cache.lastFrameUs ? "true" : "false",
+      static_cast<unsigned long>(linkAge),
+      stageName(stage),
+      operationMessage,
+      operation.waypointEnabled ? "true" : "false",
+      operation.attitudeEnabled ? "true" : "false",
+      operation.competitionCourse ? "true" : "false",
+      operation.placedWaypoints ? "true" : "false",
+      static_cast<unsigned>(operation.targetIndex),
+      targetName,
+      static_cast<unsigned>(operation.mode),
+      modeName(operation.mode),
+      static_cast<unsigned>(kAllManualMask),
+      manualValues.left,
+      manualValues.right,
+      manualValues.rear,
+      manualValues.propulsion,
+      gnssFixFresh() ? "true" : "false",
+      static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.gnssValid : 0),
+      static_cast<unsigned long>(ageMs(fix.lastValidFixUs, nowUs())),
+      fix.latitude,
+      fix.longitude,
+      fix.speedMps,
+      static_cast<unsigned>(fix.satellites),
+      static_cast<unsigned long>(gnssSentences),
+      static_cast<unsigned long>(gnssChecksumErrors),
+      sdReady ? "true" : "false",
+      sdLoggingEnabled ? "true" : "false",
+      sdLogPath,
+      static_cast<unsigned long>(sdLogRecords),
+      static_cast<unsigned long>(sdLogErrors),
+      connected ? "true" : "false",
+      (cache.hasActuators && cache.actuators.pcaReady) ? "true" : "false",
+      imuReady ? "true" : "false",
+      tofReady ? "true" : "false",
+      gnssCommunicationReady ? "true" : "false",
+      gnssControlReady ? "true" : "false",
+      powerReady ? "true" : "false",
+      vescReady ? "true" : "false",
+      inaReady ? "true" : "false",
+      operation.waypointEnabled ? "true" : "false",
+      operation.attitudeEnabled ? "true" : "false",
+      static_cast<unsigned>(safety),
+      safetyName(safety),
+      static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.mode : 0),
+      static_cast<unsigned>(currentStopReason(cache)),
+      stopReasonName(currentStopReason(cache)),
+      cache.hasSnapshot ? cache.snapshot.waypointDistanceM : 0.0f,
+      static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.activeWaypoint : 0),
+      cache.hasSnapshot ? cache.snapshot.targetWaypointLatitudeDeg : 0.0,
+      cache.hasSnapshot ? cache.snapshot.targetWaypointLongitudeDeg : 0.0,
+      static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.yawControlActive : 0),
+      static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.yawCriteriaMask : 0),
+      static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.vescLowErpmWarning : 0),
+      cache.hasSnapshot && isfinite(cache.snapshot.vescErpm) ? cache.snapshot.vescErpm : 0.0f,
+      static_cast<unsigned>(cache.hasActuators ? cache.actuators.pcaReady : 0),
+      static_cast<unsigned long>(cache.hasActuators ? cache.actuators.pwmErrors : 0),
+      static_cast<unsigned>(cache.hasActuators ? cache.actuators.outputsEnabled : 0),
+      static_cast<unsigned>(cache.hasActuators ? cache.actuators.enabledMask : 0),
+      static_cast<unsigned>(cache.hasActuators ? cache.actuators.leftPulseUs : 0),
+      static_cast<unsigned>(cache.hasActuators ? cache.actuators.rightPulseUs : 0),
+      static_cast<unsigned>(cache.hasActuators ? cache.actuators.rearPulseUs : 0),
+      static_cast<unsigned>(cache.hasActuators ? cache.actuators.motorRelayEnabled : 0),
+      cache.hasActuators ? cache.actuators.targetDuty : 0.0f,
+      cache.hasActuators ? cache.actuators.appliedDuty : 0.0f,
+      static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.imuValid : 0),
+      cache.hasSnapshot && isfinite(cache.snapshot.rollRad) ? cache.snapshot.rollRad : 0.0f,
+      cache.hasSnapshot && isfinite(cache.snapshot.pitchRad) ? cache.snapshot.pitchRad : 0.0f,
+      cache.hasSnapshot && isfinite(cache.snapshot.yawRad) ? cache.snapshot.yawRad : 0.0f,
+      static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.tofValid : 0),
+      cache.hasSnapshot && isfinite(cache.snapshot.tofFilteredM) ? cache.snapshot.tofFilteredM
+                                                                 : 0.0f,
+      static_cast<unsigned long>(cache.frames),
+      static_cast<unsigned long>(crcErrors),
+      static_cast<unsigned long>(cobsErrors),
+      static_cast<unsigned long>(lengthErrors));
   web.send(200, "application/json; charset=utf-8", body);
 }
 
@@ -1120,7 +1767,20 @@ void startWeb() {
   web.on("/", HTTP_GET, [] {
     web.send(200, "text/html; charset=utf-8", productionPageJapanese);
   });
+  web.on("/track", HTTP_GET, [] {
+    web.send(200, "text/html; charset=utf-8", productionTrackPageJapanese);
+  });
+  web.on("/sensors", HTTP_GET, [] {
+    web.send(200, "text/html; charset=utf-8", productionSensorsPageJapanese);
+  });
   web.on("/api/status", HTTP_GET, apiStatus);
+  web.on("/api/sensors", HTTP_GET, apiSensors);
+  web.on("/api/track", HTTP_GET, apiTrackGet);
+  web.on("/api/track/reset", HTTP_POST, apiTrackReset);
+  web.on("/api/track/waypoints", HTTP_POST, apiTrackWaypointsPost);
+  web.on("/api/tuning", HTTP_GET, apiTuningGet);
+  web.on("/api/tuning", HTTP_POST, apiTuningPost);
+  web.on("/api/logging", HTTP_POST, apiLoggingPost);
   web.on("/api/start", HTTP_POST, apiStart);
   web.on("/api/value", HTTP_POST, apiValue);
   web.on("/api/stop", HTTP_POST, apiStop);
@@ -1201,8 +1861,10 @@ void setup() {
 void loop() {
   web.handleClient();
   serviceGnss();
+  serviceTrack();
   sendHeartbeat();
   serviceOperation();
+  serviceSdLog();
   if (millis() - lastStatusLogMs >= kStatusLogPeriodMs) {
     lastStatusLogMs = millis();
     printStatus();

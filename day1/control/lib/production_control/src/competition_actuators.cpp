@@ -13,12 +13,21 @@ ServoMapper::ServoMapper(const ServoTuning &t) : tuning_(t) {
 }
 
 bool ServoMapper::valid(const ServoTuning &t) {
-  return std::isfinite(t.minUs) && std::isfinite(t.neutralUs) && std::isfinite(t.maxUs) &&
-         t.minUs >= 500.0f && t.maxUs <= 2500.0f && t.minUs < t.neutralUs && t.neutralUs < t.maxUs;
+  return std::isfinite(t.negativeUs) && std::isfinite(t.centerUs) && std::isfinite(t.positiveUs) &&
+         t.negativeUs >= 500.0f && t.negativeUs <= 2500.0f && t.centerUs >= 500.0f &&
+         t.centerUs <= 2500.0f && t.positiveUs >= 500.0f && t.positiveUs <= 2500.0f;
+}
+
+bool ServoMapper::setTuning(const ServoTuning &t) {
+  if (!valid(t))
+    return false;
+  tuning_ = t;
+  reset();
+  return true;
 }
 
 void ServoMapper::reset() {
-  previousUs_ = valid(tuning_) ? static_cast<uint16_t>(tuning_.neutralUs + .5f) : 1500;
+  previousUs_ = valid(tuning_) ? static_cast<uint16_t>(tuning_.centerUs + .5f) : 1500;
 }
 
 ServoResult ServoMapper::map(float normalized) {
@@ -29,13 +38,12 @@ ServoResult ServoMapper::map(float normalized) {
     r.clamped = true;
     return r;
   }
-  if (tuning_.reversed)
-    normalized = -normalized;
   const float constrained = clampf(normalized, -1.0f, 1.0f);
   r.clamped = constrained != normalized;
-  const float target = constrained >= 0
-                           ? tuning_.neutralUs + constrained * (tuning_.maxUs - tuning_.neutralUs)
-                           : tuning_.neutralUs + constrained * (tuning_.neutralUs - tuning_.minUs);
+  const float target =
+      constrained >= 0
+          ? tuning_.centerUs + constrained * (tuning_.positiveUs - tuning_.centerUs)
+          : tuning_.centerUs + (-constrained) * (tuning_.negativeUs - tuning_.centerUs);
   previousUs_ = static_cast<uint16_t>(target + .5f);
   r.pulseUs = previousUs_;
   return r;
@@ -69,6 +77,17 @@ float ServoSpikeFilter::apply(float desired) {
   accepted_ = desired;
   pendingDirection_ = 0;
   return accepted_;
+}
+
+void DutyRamp::setMaximum(float maximum) {
+  maximum_ = std::isfinite(maximum) && maximum >= 0.0f ? maximum : 0.0f;
+  target_ = clampf(target_, 0.0f, maximum_);
+  applied_ = clampf(applied_, 0.0f, maximum_);
+}
+
+void DutyRamp::setRiseSeconds(float seconds) {
+  if (std::isfinite(seconds) && seconds >= .10f && seconds <= 20.0f)
+    riseSeconds_ = seconds;
 }
 
 void DutyRamp::setTarget(float duty) {

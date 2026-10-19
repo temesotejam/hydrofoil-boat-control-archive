@@ -34,9 +34,10 @@ TestProfile profile = TestProfile::None;
 bool tofReady = false, inaReady = false, pcaReady = false, navOriginSet = false,
      competitionOutputsOff = true, motorRelayEnabled = false;
 uint32_t bootId = 0, lastVescReqMs = 0, lastDutyMs = 0;
-uint64_t lastInaUs = 0, lastInaPollUs = 0, lastTofUs = 0, lastVescRxUs = 0, testStartMs = 0,
-         lastDiagMs = 0, lastHostHeartbeatMs = 0, lastControlHeartbeatMs = 0, lastNavSequence = 0,
-         navSequenceGaps = 0, navCrcErrors = 0, tofIntegrationMsActual = 0;
+uint64_t lastInaUs = 0, lastInaPollUs = 0, lastTofUs = 0, lastVescRxUs = 0,
+         lastDetailTelemetryUs = 0, testStartMs = 0, lastDiagMs = 0, lastHostHeartbeatMs = 0,
+         lastControlHeartbeatMs = 0, lastNavSequence = 0, navSequenceGaps = 0, navCrcErrors = 0,
+         tofIntegrationMsActual = 0;
 int32_t navOriginLatE7 = 0, navOriginLonE7 = 0;
 float navNorthM = 0.0f, navEastM = 0.0f;
 uint16_t servoTarget = kServoCenterUs, servoOutput = kServoCenterUs, tofResolutionActual = 0,
@@ -137,6 +138,23 @@ struct PrimaryImuLatest {
   float accel[3]{}, gyro[3]{}, magnetic[3]{};
 } primaryImu;
 
+struct RuntimeTuningState {
+  float kpPitch = kCompetitionKpPitch, kdPitch = kCompetitionKdPitch, kpRoll = kCompetitionKpRoll,
+        kdRoll = kCompetitionKdRoll, pitchCommandCutoffHz = kCompetitionPitchCommandCutoffHz,
+        rollCommandCutoffHz = kCompetitionRollCommandCutoffHz,
+        heightCommandCutoffHz = kCompetitionHeightCommandCutoffHz,
+        yawCommandCutoffHz = kCompetitionYawCommandCutoffHz;
+  float kpHeight = kCompetitionKpHeight, kpYaw = kCompetitionKpYaw, kdYaw = kCompetitionKdYaw,
+        targetHeightM = kCompetitionTargetHeightM, maxDuty = kVescMaxDuty,
+        vescRampRiseSeconds = kVescRampRiseSeconds;
+  float leftUpDeg = kCompetitionLeftUpDeg, leftMiddleDeg = kCompetitionLeftMiddleDeg,
+        leftDownDeg = kCompetitionLeftDownDeg;
+  float rightUpDeg = kCompetitionRightUpDeg, rightMiddleDeg = kCompetitionRightMiddleDeg,
+        rightDownDeg = kCompetitionRightDownDeg;
+  float rearLeftDeg = kCompetitionRearLeftDeg, rearMiddleDeg = kCompetitionRearMiddleDeg,
+        rearRightDeg = kCompetitionRearRightDeg;
+} runtimeTuning;
+
 production_control::Controller competitionController{};
 production_control::CommandIngress competitionIngress{};
 production_control::Output competitionOutput{};
@@ -146,19 +164,18 @@ uint64_t lastCompetitionActuatorUs = 0, lastVescControlUs = 0;
 uint16_t competitionLeftPulseUs = 0, competitionRightPulseUs = 0, competitionRearPulseUs = 0;
 float vescTargetDuty = 0.0f, vescAppliedDuty = 0.0f;
 production_control::DutyRamp vescRamp(kVescMaxDuty, kVescRampRiseSeconds, kVescRampFallSeconds);
-production_control::ServoMapper
-    competitionLeftServo(production_control::ServoTuning(kCompetitionServoMinUs,
-                                                         kCompetitionServoNeutralUs,
-                                                         kCompetitionServoMaxUs,
-                                                         kCompetitionLeftReversed)),
-    competitionRightServo(production_control::ServoTuning(kCompetitionServoMinUs,
-                                                          kCompetitionServoNeutralUs,
-                                                          kCompetitionServoMaxUs,
-                                                          kCompetitionRightReversed)),
-    competitionRearServo(production_control::ServoTuning(kCompetitionServoMinUs,
-                                                         kCompetitionServoNeutralUs,
-                                                         kCompetitionServoMaxUs,
-                                                         kCompetitionRearReversed));
+production_control::ServoMapper competitionLeftServo(
+    production_control::ServoTuning(servoAngleToPulseUs(kCompetitionLeftUpDeg),
+                                    servoAngleToPulseUs(kCompetitionLeftMiddleDeg),
+                                    servoAngleToPulseUs(kCompetitionLeftDownDeg))),
+    competitionRightServo(
+        production_control::ServoTuning(servoAngleToPulseUs(kCompetitionRightUpDeg),
+                                        servoAngleToPulseUs(kCompetitionRightMiddleDeg),
+                                        servoAngleToPulseUs(kCompetitionRightDownDeg))),
+    competitionRearServo(
+        production_control::ServoTuning(servoAngleToPulseUs(kCompetitionRearLeftDeg),
+                                        servoAngleToPulseUs(kCompetitionRearMiddleDeg),
+                                        servoAngleToPulseUs(kCompetitionRearRightDeg)));
 production_control::ServoSpikeFilter competitionLeftSpikeFilter(kCompetitionServoSpikeThreshold),
     competitionRightSpikeFilter(kCompetitionServoSpikeThreshold);
 
@@ -169,10 +186,39 @@ struct NavigationInput {
   bool valid = false;
 } navigation{};
 
+struct GnssHeadingSample {
+  float northM = 0, eastM = 0;
+  uint64_t timestampUs = 0;
+};
+
+struct GnssHeadingState {
+  GnssHeadingSample samples[kGnssHeadingWindowSamples]{};
+  uint8_t count = 0, next = 0;
+  float courseRad = 0, yawRateRadS = 0;
+  uint64_t timestampUs = 0, previousCourseUs = 0;
+  float previousCourseRad = 0;
+  bool valid = false, previousCourseValid = false;
+} gnssHeading{};
+
+enum YawCriterion : uint8_t { YawDuty = 1u << 0, YawErpm = 1u << 1, YawImuDirection = 1u << 2 };
+
+struct YawGateState {
+  uint8_t criteriaMask = 0;
+  bool active = false, lowErpmWarning = false;
+  uint64_t lowErpmSinceUs = 0;
+} yawGate{};
+enum class HydrofoilPhase : uint8_t { Displacement = 0, LiftDetect = 1, Blend = 2, Foiling = 3 };
+
+struct HydrofoilState {
+  HydrofoilPhase phase = HydrofoilPhase::Displacement;
+  uint64_t conditionSinceUs = 0, blendStartedUs = 0;
+} hydrofoil{};
+
 uint32_t waypointRevision = 0, waypointRequestId = 0;
 float waypointReachRadiusM = 1.5f;
 boat::WaypointGeo waypointGeo[16]{};
 uint8_t waypointGeoCount = 0, waypointActive = 0;
+bool waypointCompetitionCourse = false;
 uint32_t lastPrimaryImuSnapshotTxMs = 0;
 
 production_control::AuthoritativeSafety competitionSafety(SafetyState s) {
@@ -213,6 +259,10 @@ void setup() {
   competitionConfig.kdPitch = kCompetitionKdPitch;
   competitionConfig.kpRoll = kCompetitionKpRoll;
   competitionConfig.kdRoll = kCompetitionKdRoll;
+  competitionConfig.pitchCommandCutoffHz = kCompetitionPitchCommandCutoffHz;
+  competitionConfig.rollCommandCutoffHz = kCompetitionRollCommandCutoffHz;
+  competitionConfig.heightCommandCutoffHz = kCompetitionHeightCommandCutoffHz;
+  competitionConfig.yawCommandCutoffHz = kCompetitionYawCommandCutoffHz;
   competitionConfig.kpHeight = kCompetitionKpHeight;
   competitionConfig.kpYaw = kCompetitionKpYaw;
   competitionConfig.kdYaw = kCompetitionKdYaw;
@@ -231,7 +281,6 @@ void setup() {
   competitionConfig.stallErpm = kStallErpm;
   competitionConfig.cavitationErpm = kCavitationErpm;
   competitionConfig.cavitationCurrentA = kCavitationCurrentA;
-  competitionConfig.cavitationSpeedMps = kCavitationSpeedMps;
   competitionConfig.powerStaleUs = kPowerStateStaleUs;
   competitionConfig.vescStaleUs = kVescStateStaleUs;
   competitionController.setConfig(competitionConfig);

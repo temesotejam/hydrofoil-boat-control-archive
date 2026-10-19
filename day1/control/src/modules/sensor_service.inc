@@ -130,6 +130,8 @@ void bnoEvent(const bno::Sample &sample) {
 }
 
 void sendControlState() {
+  if (kLowBandwidthLink)
+    return;
   const uint32_t now = millis();
   if (now - lastEstimatedStateTxMs < kEstimatedStateTxIntervalMs)
     return;
@@ -139,6 +141,8 @@ void sendControlState() {
 }
 
 void sendPrimaryImuSnapshot() {
+  if (kLowBandwidthLink)
+    return;
   const uint32_t now = millis();
   if (now - lastPrimaryImuSnapshotTxMs < kPrimaryImuSnapshotTxIntervalMs || !primaryImu.accelUs ||
       !primaryImu.gyroUs || !primaryImu.magneticUs)
@@ -211,6 +215,30 @@ void scan() {
   Serial.printf("PERIPH_SCAN %s\n", used ? addresses : "none");
 }
 
+void retryPeripheralSensors() {
+  static uint32_t lastRetryMs = 0, tofStartedMs = 0;
+  const uint32_t now = millis();
+  if (now - lastRetryMs < kReinitIntervalMs)
+    return;
+  lastRetryMs = now;
+  if (tofReady && !tofStartedMs)
+    tofStartedMs = now;
+  const uint64_t now_us = nowUs();
+  const bool tofStalled = tofReady && ((lastTofUs && now_us - lastTofUs > 1000000ULL) ||
+                                       (!lastTofUs && now - tofStartedMs > 5000UL));
+  if (!tofReady || tofStalled) {
+    if (tofReady)
+      tof.stopRanging();
+    lastTofUs = 0;
+    tofReady = configureTof(experiment_config::kTofProfile);
+    tofStartedMs = now;
+  }
+  if (kEnableIna226 && !inaReady) {
+    ina.profile = InaProfile::Balanced;
+    inaReady = ina.begin();
+  }
+}
+
 void pollTof() {
   if (!tofReady)
     return;
@@ -263,11 +291,13 @@ void pollTof() {
   const float corrected = validDistance ? mean * cosf(state.rollRad) * cosf(state.pitchRad) : NAN;
   controlState.updateWaterDistance(readStart, corrected, validDistance);
 
-  uint8_t payload[196];
-  memcpy(payload, &tofFrames, 4);
-  memcpy(payload + 4, tofData.distance_mm, 128);
-  memcpy(payload + 132, tofData.target_status, 64);
-  linkSend(boat::Type::TofFrame, payload, sizeof(payload));
+  if (!kLowBandwidthLink) {
+    uint8_t payload[196];
+    memcpy(payload, &tofFrames, 4);
+    memcpy(payload + 4, tofData.distance_mm, 128);
+    memcpy(payload + 132, tofData.target_status, 64);
+    linkSend(boat::Type::TofFrame, payload, sizeof(payload));
+  }
 }
 
 void pollIna() {
@@ -278,19 +308,20 @@ void pollIna() {
     if (inaReady && ina.read(sample) && sample.valid) {
       latestIna = sample;
       lastInaUs = sample.us;
+      if (!kLowBandwidthLink) {
+        struct __attribute__((packed)) {
+          int16_t shunt, current;
+          uint16_t bus, power, mask;
+          uint32_t i2cUs;
+        } payload{sample.rawShunt,
+                  sample.rawCurrent,
+                  sample.rawBus,
+                  sample.rawPower,
+                  sample.mask,
+                  sample.i2cUs};
 
-      struct __attribute__((packed)) {
-        int16_t shunt, current;
-        uint16_t bus, power, mask;
-        uint32_t i2cUs;
-      } payload{sample.rawShunt,
-                sample.rawCurrent,
-                sample.rawBus,
-                sample.rawPower,
-                sample.mask,
-                sample.i2cUs};
-
-      linkSend(boat::Type::InaSample, reinterpret_cast<uint8_t *>(&payload), sizeof(payload));
+        linkSend(boat::Type::InaSample, reinterpret_cast<uint8_t *>(&payload), sizeof(payload));
+      }
     }
   }
 }
@@ -303,8 +334,9 @@ void pollVesc() {
       if (frame.crcOk && frame.endOk && vesc::Parser::parseCurrentValues(frame, vescValues)) {
         lastVescRxUs = nowUs();
         ++vescResp;
-        linkSend(
-            boat::Type::VescStatus, reinterpret_cast<uint8_t *>(&vescValues), sizeof(vescValues));
+        if (!kLowBandwidthLink)
+          linkSend(
+              boat::Type::VescStatus, reinterpret_cast<uint8_t *>(&vescValues), sizeof(vescValues));
       } else {
         ++vescErrors;
       }

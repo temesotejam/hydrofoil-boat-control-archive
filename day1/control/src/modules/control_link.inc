@@ -509,7 +509,8 @@ void vescDutyRaw(float duty) {
     setMotorRelay(false);
     return;
   }
-  const float limited = moving ? constrain(duty, -kVescMaxDuty, kVescMaxDuty) : 0.0f;
+  const float maximum = constrain(runtimeTuning.maxDuty, 0.0f, kVescMaxDuty);
+  const float limited = moving ? constrain(duty, -maximum, maximum) : 0.0f;
   if (moving)
     setMotorRelay(true);
   int32_t x = (int32_t)(limited * 100000.0f);

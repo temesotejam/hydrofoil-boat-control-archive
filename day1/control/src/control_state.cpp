@@ -123,10 +123,15 @@ void State::updateGnss(uint64_t receivedUs,
 
 void State::updateWaterDistance(uint64_t receivedUs, float distanceM, bool valid) {
   portENTER_CRITICAL(&mux_);
-  if (valid)
+  // A VL53L5CX frame can occasionally contain no valid zones even while the
+  // sensor is continuously ranging. Keep the most recent good measurement
+  // until the normal ToF stale timeout expires, rather than dropping height
+  // control for one bad frame.
+  if (valid) {
     waterDistanceM_ = distanceM;
-  tofReceivedUs_ = receivedUs;
-  waterValid_ = valid;
+    tofReceivedUs_ = receivedUs;
+    waterValid_ = true;
+  }
   portEXIT_CRITICAL(&mux_);
 }
 

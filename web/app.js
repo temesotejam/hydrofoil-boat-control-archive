@@ -1,5 +1,5 @@
 'use strict';
-const versions={day1:{label:'1日目',commit:'bf8067c35ee56c884bfbd16e277b27db6e72ef98',variant:'course-preset-v1'},day2:{label:'2日目',commit:'0820d1d1c2107609c839bf6cc5d8c42f9d56e982',variant:''}};
+const versions={day1:{label:'1日目',commit:'88bed77ee1779f9e76afa91d313e38ace85177a6',variant:'used-day1-v1'},day2:{label:'2日目',commit:'0820d1d1c2107609c839bf6cc5d8c42f9d56e982',variant:''}};
 let buildInfo=null;
 const byId=id=>document.getElementById(id);
 function update(){
@@ -8,7 +8,7 @@ function update(){
  byId('selected-label').textContent=version.label;
  byId('download-all').textContent=version.label+'のプログラムZIP（2台分）';
  for(const [id,kind] of [['download-all','program'],['download-control','control'],['download-communication','communication']])byId(id).href='./downloads/hydrofoil-'+day+'-'+kind+'.zip';
- byId('source-commit').textContent='選択中の原典コミット：'+version.commit+(version.variant?' / '+version.variant:'');
+ byId('source-commit').textContent='選択中の保存版：'+version.commit+(version.variant?' / '+version.variant:'');
  const container=byId('installers');container.replaceChildren();
  if(!buildInfo){container.hidden=true;return;}
  container.hidden=false;

@@ -272,8 +272,7 @@ bool Reader::enableOne(uint8_t kind, uint8_t reportId, uint32_t intervalUs, Feat
 bool Reader::enableReports(FeaturePhase phase) {
   bool ok = true;
 #if BOAT_EXPERIMENT == 31
-  // Control profile: BNO08X fused attitude is authoritative. Raw reports are
-  // retained for angular-rate control and logging, not for another filter.
+  // Reconstructed day1 profile uses magnetometer-assisted Rotation Vector.
   ok = enableOne(1, SH2_ACCELEROMETER, 10000UL, phase) && ok;
   ok = enableOne(2, SH2_GYROSCOPE_CALIBRATED, 10000UL, phase) && ok;
   ok = enableOne(3, SH2_ROTATION_VECTOR, kRotationIntervalUs, phase) && ok;

@@ -65,7 +65,8 @@ enum class StopReason : uint8_t {
   MotorStall = 18,
   AttitudeDanger = 19,
   VescStale = 20,
-  Cavitation = 21
+  Cavitation = 21,
+  GnssHeadingTimeout = 22
 };
 
 struct CommandResult {
@@ -113,11 +114,22 @@ struct PhysicalConfig {
 
 struct Config {
   float kpPitch = .8f, kdPitch = .10f, kpRoll = 1.25f, kdRoll = .22f;
+  float pitchCommandCutoffHz = 0.0f, rollCommandCutoffHz = 0.0f, heightCommandCutoffHz = 0.0f,
+        yawCommandCutoffHz = 0.0f;
   float kpHeight = .75f, kpYaw = .90f, kdYaw = .12f;
   float targetPitch = 0, targetRoll = 0, targetHeightM = .45f;
   float attitudeServoLimit = .50f;
   float autoPropulsion = .55f, slewPerStep = .04f, waypointReachM = 1.5f;
   float losLookaheadM = 4.0f, minCourseSpeedMps = .5f;
+  // Competition-course settings mirror waypoint_drift_los_goal_time_sim.
+  // They are deliberately isolated from the normal one-point LOS mode.
+  float competitionCruiseSpeedMps = 4.0f, competitionMinTurnRadiusM = 90.0f;
+  float competitionGateRadiusFactor = 1.30f, competitionGateWidthM = 36.0f;
+  float competitionLookFarM = 100.0f, competitionLookNearM = 35.0f;
+  float competitionNearRadiusM = 180.0f, competitionLosErrorReduce = .45f;
+  float competitionDriftTauS = 8.0f, competitionDriftMaxMps = 2.0f;
+  float competitionRecoveryCrossTrackM = 85.0f;
+  uint32_t competitionRecoveryHoldUs = 3000000;
   float pitchPriorityRad = .35f, attitudeStopRad = .61f;
   bool enableAttitudeDangerTrip = false;
   float lowSpeedMps = .5f, highSpeedMps = 3.0f;
@@ -162,6 +174,7 @@ struct Output {
   uint16_t flags = 0;
   uint8_t activeWaypoint = 0, enabledMask = 0;
   bool saturated = false, physicalGate = false, waypointReached = false;
+  bool competitionCourse = false, recovering = false;
 };
 
 class Controller {
@@ -175,12 +188,17 @@ public:
   CommandResult setWaypoints(const Waypoint *points,
                              uint8_t count,
                              uint32_t requestId,
-                             AuthoritativeSafety safety);
+                             AuthoritativeSafety safety,
+                             bool competitionCourse = false);
   CommandResult setWaypointReachRadius(float radiusM, AuthoritativeSafety safety);
   Output step(const SensorInput &input);
 
   ControlMode mode() const {
     return mode_;
+  }
+
+  const Config &config() const {
+    return config_;
   }
 
   uint64_t manualReceivedUs() const {
@@ -199,6 +217,10 @@ public:
     return activeWaypoint_;
   }
 
+  bool competitionCourse() const {
+    return competitionCourse_;
+  }
+
   static bool physicalConfigurationValid(const PhysicalConfig &config);
 
 private:
@@ -208,6 +230,11 @@ private:
   void safe(Output &output, StopReason reason, SafetyRequest request) const;
   float speedBlend(float speed) const;
   float waypointCourse(const SensorInput &input, Output &output);
+  void buildCompetitionGates();
+  bool competitionGatePassed(const SensorInput &input, const Output &output) const;
+  void updateDriftEstimate(const SensorInput &input);
+  bool startDubinsRecovery(const SensorInput &input);
+  void resetNavigationState();
 
   Config config_{};
   ControlMode mode_ = ControlMode::Manual;
@@ -217,6 +244,24 @@ private:
   bool headingSet_ = false, segmentStartSet_ = false;
   Waypoint waypoints_[16]{};
   uint8_t waypointCount_ = 0, activeWaypoint_ = 0;
+
+  struct CompetitionGate {
+    Waypoint point{};
+    float headingRad = 0;
+    uint8_t routeIndex = 0;
+    bool goal = false;
+  };
+
+  static constexpr uint8_t kMaxCompetitionGates = 192, kMaxRecoveryGates = 64;
+  CompetitionGate competitionGates_[kMaxCompetitionGates]{};
+  CompetitionGate recoveryGates_[kMaxRecoveryGates]{};
+  uint8_t competitionGateCount_ = 0, activeCompetitionGate_ = 0, recoveryGateCount_ = 0,
+          activeRecoveryGate_ = 0, recoveryRejoinGate_ = 0;
+  bool competitionCourse_ = false, recovering_ = false, lastPositionValid_ = false,
+       lastGnssValid_ = false;
+  float lastPositionNorth_ = 0, lastPositionEast_ = 0, lastGnssNorth_ = 0, lastGnssEast_ = 0;
+  uint64_t lastGnssUs_ = 0, recoveryCrossTrackStartUs_ = 0;
+  float driftNorthMps_ = 0, driftEastMps_ = 0, lastCrossTrackM_ = 0;
   float segmentStartNorth_ = 0, segmentStartEast_ = 0;
   float previous_[4]{};
 };

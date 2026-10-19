@@ -14,8 +14,11 @@ void syncCompetitionWaypoints() {
     points[i].eastM = static_cast<float>((waypointGeo[i].longitudeDeg - originLon) * eastScale);
   }
   competitionController.setWaypointReachRadius(waypointReachRadiusM, competitionSafety(safety));
-  competitionController.setWaypoints(
-      points, waypointGeoCount, waypointRequestId, competitionSafety(safety));
+  competitionController.setWaypoints(points,
+                                     waypointGeoCount,
+                                     waypointRequestId,
+                                     competitionSafety(safety),
+                                     waypointCompetitionCourse);
 }
 
 void handleWaypointSet(const boat::Frame &frame) {
@@ -62,7 +65,8 @@ void handleWaypointSet(const boat::Frame &frame) {
     ack.reason = Revision;
   } else if (request.revision < waypointRevision)
     ack.reason = Revision;
-  else if (request.action != 1 || request.count == 0 || request.count > 16 ||
+  else if ((request.action != 1 && request.action != 2) || request.count == 0 ||
+           request.count > 16 || (request.action == 2 && request.count != 11) ||
            !isfinite(request.reachRadiusM) || request.reachRadiusM < .5f ||
            request.reachRadiusM > 20.0f)
     ack.reason = request.count == 0 ? Empty : Range;
@@ -83,6 +87,7 @@ void handleWaypointSet(const boat::Frame &frame) {
       waypointRevision = request.revision;
       waypointRequestId = request.requestId;
       waypointGeoCount = request.count;
+      waypointCompetitionCourse = request.action == 2;
       waypointActive = 0;
       waypointReachRadiusM = request.reachRadiusM;
       memcpy(waypointGeo, request.points, sizeof(boat::WaypointGeo) * request.count);
@@ -120,6 +125,140 @@ void handleCompetitionCommand(const boat::Frame &frame) {
     sendCompetitionIngressAck(result);
 }
 
+bool validRuntimeTuningValue(float value, float low, float high) {
+  return isfinite(value) && value >= low && value <= high;
+}
+
+bool validServoPositions(float negative, float center, float positive) {
+  return validRuntimeTuningValue(negative, 0.0f, 180.0f) &&
+         validRuntimeTuningValue(center, 0.0f, 180.0f) &&
+         validRuntimeTuningValue(positive, 0.0f, 180.0f);
+}
+
+void sendRuntimeTuningAck(const boat::RuntimeTuningCommandPayload &request,
+                          uint8_t disposition,
+                          uint16_t reason,
+                          uint64_t receivedUs,
+                          uint64_t appliedUs) {
+  boat::ControlCommandAckPayload ack{};
+  ack.requestId = request.requestId;
+  ack.commandSequence = request.commandSequence;
+  ack.commandType = static_cast<uint8_t>(boat::Type::RuntimeTuning);
+  ack.disposition = disposition;
+  ack.safetyState = static_cast<uint8_t>(safety);
+  ack.controlMode = static_cast<uint8_t>(competitionController.mode());
+  ack.reason = reason;
+  ack.receivedUs = receivedUs;
+  ack.appliedUs = appliedUs;
+  ack.canonicalCrc =
+      boat::canonicalCrc(&ack, offsetof(boat::ControlCommandAckPayload, canonicalCrc));
+  linkSend(boat::Type::ControlCommandAck, reinterpret_cast<uint8_t *>(&ack), sizeof(ack));
+}
+
+void handleRuntimeTuning(const boat::Frame &frame) {
+  enum : uint16_t { None = 0, Safety = 1, Crc = 2, Type = 3, Range = 4, Protocol = 6 };
+
+  boat::RuntimeTuningCommandPayload request{};
+  const uint64_t receivedUs = nowUs();
+  if (frame.header.length != sizeof(request)) {
+    sendRuntimeTuningAck(request, 1, Type, receivedUs, 0);
+    return;
+  }
+  memcpy(&request, frame.payload, sizeof(request));
+  if (request.protocolVersion != boat::kVersion) {
+    sendRuntimeTuningAck(request, 1, Protocol, receivedUs, 0);
+    return;
+  }
+  if (request.canonicalCrc !=
+      boat::canonicalCrc(&request, offsetof(boat::RuntimeTuningCommandPayload, canonicalCrc))) {
+    sendRuntimeTuningAck(request, 1, Crc, receivedUs, 0);
+    return;
+  }
+  if (safety != SafetyState::DISARMED) {
+    sendRuntimeTuningAck(request, 1, Safety, receivedUs, 0);
+    return;
+  }
+  const bool gainsOk = validRuntimeTuningValue(request.kpPitch, 0.0f, 10.0f) &&
+                       validRuntimeTuningValue(request.kdPitch, 0.0f, 5.0f) &&
+                       validRuntimeTuningValue(request.kpRoll, 0.0f, 10.0f) &&
+                       validRuntimeTuningValue(request.kdRoll, 0.0f, 5.0f) &&
+                       request.pitchCommandCutoffHz == 0.0f &&
+                       request.rollCommandCutoffHz == 0.0f &&
+                       request.heightCommandCutoffHz == 0.0f &&
+                       request.yawCommandCutoffHz == 0.0f &&
+                       validRuntimeTuningValue(request.kpHeight, 0.0f, 10.0f) &&
+                       validRuntimeTuningValue(request.kpYaw, 0.0f, 10.0f) &&
+                       validRuntimeTuningValue(request.kdYaw, 0.0f, 5.0f) &&
+                       validRuntimeTuningValue(request.targetHeightM, 0.10f, 2.00f) &&
+                       validRuntimeTuningValue(request.maxDuty, 0.0f, kVescMaxDuty) &&
+                       validRuntimeTuningValue(request.vescRampRiseSeconds, 0.10f, 20.0f);
+  const bool anglesOk =
+      validServoPositions(request.leftUpDeg, request.leftMiddleDeg, request.leftDownDeg) &&
+      validServoPositions(request.rightUpDeg, request.rightMiddleDeg, request.rightDownDeg) &&
+      validServoPositions(request.rearLeftDeg, request.rearMiddleDeg, request.rearRightDeg);
+  const production_control::ServoTuning left(servoAngleToPulseUs(request.leftUpDeg),
+                                             servoAngleToPulseUs(request.leftMiddleDeg),
+                                             servoAngleToPulseUs(request.leftDownDeg)),
+      right(servoAngleToPulseUs(request.rightUpDeg),
+            servoAngleToPulseUs(request.rightMiddleDeg),
+            servoAngleToPulseUs(request.rightDownDeg)),
+      rear(servoAngleToPulseUs(request.rearLeftDeg),
+           servoAngleToPulseUs(request.rearMiddleDeg),
+           servoAngleToPulseUs(request.rearRightDeg));
+  if (!gainsOk || !anglesOk || !production_control::ServoMapper::valid(left) ||
+      !production_control::ServoMapper::valid(right) ||
+      !production_control::ServoMapper::valid(rear)) {
+    sendRuntimeTuningAck(request, 1, Range, receivedUs, 0);
+    return;
+  }
+  safeOutputs();
+  competitionLeftServo.setTuning(left);
+  competitionRightServo.setTuning(right);
+  competitionRearServo.setTuning(rear);
+  vescRamp.setMaximum(request.maxDuty);
+  vescRamp.setRiseSeconds(request.vescRampRiseSeconds);
+  production_control::Config config = competitionController.config();
+  config.kpPitch = request.kpPitch;
+  config.kdPitch = request.kdPitch;
+  config.kpRoll = request.kpRoll;
+  config.kdRoll = request.kdRoll;
+  config.pitchCommandCutoffHz = request.pitchCommandCutoffHz;
+  config.rollCommandCutoffHz = request.rollCommandCutoffHz;
+  config.heightCommandCutoffHz = request.heightCommandCutoffHz;
+  config.yawCommandCutoffHz = request.yawCommandCutoffHz;
+  config.kpHeight = request.kpHeight;
+  config.kpYaw = kEnableYawControl ? request.kpYaw : 0.0f;
+  config.kdYaw = kEnableYawControl ? request.kdYaw : 0.0f;
+  config.targetHeightM = request.targetHeightM;
+  config.attitudeServoLimit = 1.0f;
+  competitionController.setConfig(config);
+  runtimeTuning.kpPitch = request.kpPitch;
+  runtimeTuning.kdPitch = request.kdPitch;
+  runtimeTuning.kpRoll = request.kpRoll;
+  runtimeTuning.kdRoll = request.kdRoll;
+  runtimeTuning.pitchCommandCutoffHz = request.pitchCommandCutoffHz;
+  runtimeTuning.rollCommandCutoffHz = request.rollCommandCutoffHz;
+  runtimeTuning.heightCommandCutoffHz = request.heightCommandCutoffHz;
+  runtimeTuning.yawCommandCutoffHz = request.yawCommandCutoffHz;
+  runtimeTuning.kpHeight = request.kpHeight;
+  runtimeTuning.kpYaw = kEnableYawControl ? request.kpYaw : 0.0f;
+  runtimeTuning.kdYaw = kEnableYawControl ? request.kdYaw : 0.0f;
+  runtimeTuning.targetHeightM = request.targetHeightM;
+  runtimeTuning.maxDuty = request.maxDuty;
+  runtimeTuning.vescRampRiseSeconds = request.vescRampRiseSeconds;
+  runtimeTuning.leftUpDeg = request.leftUpDeg;
+  runtimeTuning.leftMiddleDeg = request.leftMiddleDeg;
+  runtimeTuning.leftDownDeg = request.leftDownDeg;
+  runtimeTuning.rightUpDeg = request.rightUpDeg;
+  runtimeTuning.rightMiddleDeg = request.rightMiddleDeg;
+  runtimeTuning.rightDownDeg = request.rightDownDeg;
+  runtimeTuning.rearLeftDeg = request.rearLeftDeg;
+  runtimeTuning.rearMiddleDeg = request.rearMiddleDeg;
+  runtimeTuning.rearRightDeg = request.rearRightDeg;
+  latchedCompetitionReason = production_control::StopReason::None;
+  sendRuntimeTuningAck(request, 0, None, receivedUs, nowUs());
+}
+
 void printCompetitionCommandDiag() {
   const auto &metrics = competitionIngress.metrics();
   Serial.printf(
@@ -132,6 +271,99 @@ void printCompetitionCommandDiag() {
       static_cast<unsigned long>(competitionPwmErrors));
 }
 
+bool gnssHeadingFresh(uint64_t now) {
+  return gnssHeading.valid && gnssHeading.timestampUs && now >= gnssHeading.timestampUs &&
+         now - gnssHeading.timestampUs <= kGnssStateStaleUs;
+}
+
+void resetHydrofoilTransition() {
+  hydrofoil = {};
+  yawGate = {};
+}
+
+void applyImuYawLaunchGate(const production_control::SensorInput &input, uint64_t now) {
+  if (!production_control::modeUsesWaypoint(competitionOutput.mode))
+    return;
+  const bool headingReady = input.imuValid && input.imuUs && now >= input.imuUs &&
+                            now - input.imuUs <= kBnoAttitudeStaleUs;
+  const float maxDuty = constrain(runtimeTuning.maxDuty, 0.0f, kVescMaxDuty);
+  const bool dutyReady = maxDuty > 0.0f && vescAppliedDuty >= maxDuty * kGnssYawDutyFraction;
+  const bool vescFresh = vescValues.valid && lastVescRxUs && now >= lastVescRxUs &&
+                         now - lastVescRxUs <= kVescStateStaleUs && isfinite(vescValues.erpm);
+  const bool erpmReady = vescFresh && fabsf(vescValues.erpm) >= kGnssYawMinErpm;
+  yawGate.criteriaMask =
+      (dutyReady ? YawDuty : 0) | (erpmReady ? YawErpm : 0) | (headingReady ? YawImuDirection : 0);
+  // ERPM is diagnostic only.  It must not delay yaw engagement because the
+  // IMU heading validity and our own applied duty are the actual gate inputs.
+  yawGate.active = headingReady && dutyReady;
+  const bool lowErpmCondition = vescFresh && maxDuty > 0.0f &&
+                                vescAppliedDuty >= maxDuty * kVescLowErpmDutyFraction &&
+                                fabsf(vescValues.erpm) < kVescLowErpmThreshold;
+  if (lowErpmCondition) {
+    if (!yawGate.lowErpmSinceUs)
+      yawGate.lowErpmSinceUs = now;
+    yawGate.lowErpmWarning =
+        now - yawGate.lowErpmSinceUs >= static_cast<uint64_t>(kVescLowErpmHoldMs) * 1000ULL;
+  } else {
+    yawGate.lowErpmSinceUs = 0;
+    yawGate.lowErpmWarning = false;
+  }
+  if (yawGate.active)
+    return;
+  competitionOutput.uYaw = 0.0f;
+  competitionOutput.rearYaw = 0.0f;
+  competitionOutput.rearPrelimit = 0.0f;
+}
+
+float hydrofoilAttitudeBlend(const production_control::SensorInput &input, uint64_t now) {
+  const bool speedReady = (input.vescValid && input.vescErpm >= kFoilTakeoffErpm) ||
+                          input.groundSpeedMps >= kFoilTakeoffMinGnssSpeedMps;
+  const bool liftSeen = speedReady && input.tofValid && input.tofM >= kFoilDetectedWaterDistanceM;
+  if (hydrofoil.phase == HydrofoilPhase::Displacement && speedReady) {
+    hydrofoil.phase = HydrofoilPhase::LiftDetect;
+    hydrofoil.conditionSinceUs = 0;
+  }
+  if (hydrofoil.phase == HydrofoilPhase::LiftDetect) {
+    if (!speedReady) {
+      hydrofoil.phase = HydrofoilPhase::Displacement;
+      hydrofoil.conditionSinceUs = 0;
+    } else if (liftSeen) {
+      if (!hydrofoil.conditionSinceUs)
+        hydrofoil.conditionSinceUs = now;
+      if (now - hydrofoil.conditionSinceUs >= static_cast<uint64_t>(kFoilDetectHoldMs) * 1000ULL) {
+        hydrofoil.phase = HydrofoilPhase::Blend;
+        hydrofoil.blendStartedUs = now;
+      }
+    } else
+      hydrofoil.conditionSinceUs = 0;
+  }
+  if (hydrofoil.phase == HydrofoilPhase::Blend) {
+    const float blend = constrain(static_cast<float>(now - hydrofoil.blendStartedUs) /
+                                      (static_cast<float>(kFoilControlBlendMs) * 1000.0f),
+                                  0.0f,
+                                  1.0f);
+    if (blend >= 1.0f)
+      hydrofoil.phase = HydrofoilPhase::Foiling;
+    return blend;
+  }
+  return hydrofoil.phase == HydrofoilPhase::Foiling ? 1.0f : 0.0f;
+}
+
+void applyHydrofoilTransition(const production_control::SensorInput &input, uint64_t now) {
+  if (competitionOutput.mode != production_control::ControlMode::AutoWaypoint)
+    return;
+  const float blend = hydrofoilAttitudeBlend(input, now);
+  if (blend >= 1.0f)
+    return;
+  competitionOutput.leftFront *= blend;
+  competitionOutput.rightFront *= blend;
+  competitionOutput.leftPrelimit *= blend;
+  competitionOutput.rightPrelimit *= blend;
+  competitionOutput.uPitch *= blend;
+  competitionOutput.uRoll *= blend;
+  competitionOutput.uHeight *= blend;
+}
+
 bool productionPreflightReady() {
   const uint64_t now = nowUs();
   const auto estimated = controlState.snapshot(now);
@@ -140,31 +372,29 @@ bool productionPreflightReady() {
       imu.ready() &&
       estimated.attitudeHealth != static_cast<uint8_t>(boat::EstimateHealth::Invalid) &&
       estimated.gyroAgeUs <= kBnoGyroStaleUs;
-  const bool powerOk =
-      (latestIna.valid && lastInaUs && now - lastInaUs <= kPowerStateStaleUs) ||
-      (vescValues.valid && lastVescRxUs && now - lastVescRxUs <= kVescStateStaleUs &&
-       isfinite(vescValues.inputVoltageV) && vescValues.inputVoltageV > 0);
-  const bool vescOk = vescValues.valid && lastVescRxUs && now - lastVescRxUs <= kVescStateStaleUs;
   const bool linkOk =
       lastHostHeartbeatMs && millis() - lastHostHeartbeatMs <= kLinkFailSafeTimeoutMs;
   const bool waypointMode = production_control::modeUsesWaypoint(mode);
-  const bool navOk =
-      !waypointMode || (navigation.valid && competitionController.waypointCount() > 0);
   const bool manualOk =
       waypointMode || (competitionController.manualReceivedUs() &&
                        now - competitionController.manualReceivedUs() <= 500000ULL);
   const bool actuatorConfigOk = kCompetitionLeftChannel != kCompetitionRightChannel &&
                                 kCompetitionLeftChannel != kCompetitionRearChannel &&
                                 kCompetitionRightChannel != kCompetitionRearChannel &&
-                                kCompetitionServoMinUs < kCompetitionServoNeutralUs &&
-                                kCompetitionServoNeutralUs < kCompetitionServoMaxUs;
-  const bool baseOk = pcaReady && linkOk && manualOk && actuatorConfigOk;
+                                competitionLeftServo.validConfiguration() &&
+                                competitionRightServo.validConfiguration() &&
+                                competitionRearServo.validConfiguration();
+  // Missing hardware is allowed for a stationary bench check.  The output
+  // path below hard-inhibits every actuator if PCA is absent, and the
+  // controller inhibits propulsion if navigation or VESC power is absent.
+  const bool baseOk = linkOk && manualOk && actuatorConfigOk;
   if (mode == production_control::ControlMode::Manual)
     return baseOk && competitionController.manualOutputMask() != 0;
   if (mode == production_control::ControlMode::AttitudeAssist ||
       mode == production_control::ControlMode::HeadingHold)
     return baseOk && imuOk;
-  return baseOk && imuOk && navOk && powerOk && vescOk;
+  // Both waypoint modes use BNO08X yaw, even without roll/pitch assistance.
+  return baseOk && imuOk;
 }
 
 void applyCompetitionActuators(const production_control::Output &output, uint64_t now) {
@@ -179,6 +409,17 @@ void applyCompetitionActuators(const production_control::Output &output, uint64_
     if (!competitionOutputsOff || motorRelayEnabled || vescTargetDuty != 0.0f ||
         vescAppliedDuty != 0.0f)
       safeOutputs();
+    return;
+  }
+  if (!pcaReady) {
+    // Sensor / link testing may continue without PCA9685, but no servo or
+    // propulsion command may reach physical hardware in this condition.
+    competitionOutputsOff = true;
+    competitionLeftPulseUs = competitionRightPulseUs = competitionRearPulseUs = 0;
+    vescTargetDuty = vescAppliedDuty = 0.0f;
+    vescRamp.stopImmediate();
+    vescDutyRaw(0);
+    setMotorRelay(false);
     return;
   }
   const bool leftEnabled = output.enabledMask & production_control::ManualLeft;
@@ -226,7 +467,8 @@ void applyCompetitionActuators(const production_control::Output &output, uint64_
     setState(SafetyState::FAULT);
     return;
   }
-  vescTargetDuty = constrain(output.propulsion, 0.0f, 1.0f) * kVescMaxDuty;
+  vescRamp.setMaximum(runtimeTuning.maxDuty);
+  vescTargetDuty = constrain(output.propulsion, 0.0f, 1.0f) * runtimeTuning.maxDuty;
   vescRamp.setTarget(vescTargetDuty);
   const float applied = vescRamp.step(dt);
   vescAppliedDuty = applied;
@@ -275,7 +517,7 @@ void sendProductionTelemetry(const boat::EstimatedStatePayload &estimated,
   snapshot.latitudeDeg = navigation.latitudeDeg;
   snapshot.longitudeDeg = navigation.longitudeDeg;
   snapshot.speedMps = navigation.speedMps;
-  snapshot.gnssCourseRad = navigation.courseRad;
+  snapshot.gnssCourseRad = gnssHeadingFresh(now) ? gnssHeading.courseRad : NAN;
   snapshot.localNorthM = navNorthM;
   snapshot.localEastM = navEastM;
   snapshot.rollRad = estimated.rollRad;
@@ -313,36 +555,43 @@ void sendProductionTelemetry(const boat::EstimatedStatePayload &estimated,
   snapshot.targetBearingRad = competitionOutput.targetYaw;
   snapshot.courseErrorRad = competitionOutput.courseErrorRad;
   snapshot.waypointDistanceM = competitionOutput.waypointDistanceM;
+  snapshot.vescErpm = isfinite(vescValues.erpm) ? vescValues.erpm : 0.0f;
+  snapshot.yawControlActive = yawGate.active ? 1 : 0;
+  snapshot.yawCriteriaMask = yawGate.criteriaMask;
+  snapshot.vescLowErpmWarning = yawGate.lowErpmWarning ? 1 : 0;
   if (waypointGeoCount && competitionOutput.activeWaypoint < waypointGeoCount) {
     snapshot.targetWaypointLatitudeDeg = waypointGeo[competitionOutput.activeWaypoint].latitudeDeg;
     snapshot.targetWaypointLongitudeDeg =
         waypointGeo[competitionOutput.activeWaypoint].longitudeDeg;
   }
   linkSend(boat::Type::ControlSnapshot, reinterpret_cast<uint8_t *>(&snapshot), sizeof(snapshot));
-  boat::InaStatusPayload power{};
-  power.timestampUs = lastInaUs;
-  power.ageUs = controlAge(lastInaUs, now);
-  power.busVoltageV = latestIna.busV;
-  power.shuntVoltageV = latestIna.shuntV;
-  power.currentA = latestIna.currentRegA;
-  power.powerW = latestIna.powerRegW;
-  power.valid = latestIna.valid;
-  power.errorCode = latestIna.valid ? 0 : 1;
-  linkSend(boat::Type::InaStatus, reinterpret_cast<uint8_t *>(&power), sizeof(power));
-  boat::VescTelemetryPayload motor{};
-  motor.timestampUs = lastVescRxUs;
-  motor.ageUs = controlAge(lastVescRxUs, now);
-  motor.inputVoltageV = vescValues.inputVoltageV;
-  motor.motorCurrentA = vescValues.motorCurrentA;
-  motor.inputCurrentA = vescValues.inputCurrentA;
-  motor.duty = vescValues.duty;
-  motor.erpm = vescValues.erpm;
-  motor.mosTempC = vescValues.mosTempC;
-  motor.motorTempC = vescValues.motorTempC;
-  motor.tachometer = vescValues.tachometer;
-  motor.valid = vescValues.valid;
-  motor.fault = vescValues.fault;
-  linkSend(boat::Type::VescTelemetry, reinterpret_cast<uint8_t *>(&motor), sizeof(motor));
+  if (!lastDetailTelemetryUs || now - lastDetailTelemetryUs >= 1000000ULL) {
+    lastDetailTelemetryUs = now;
+    boat::InaStatusPayload power{};
+    power.timestampUs = lastInaUs;
+    power.ageUs = controlAge(lastInaUs, now);
+    power.busVoltageV = latestIna.busV;
+    power.shuntVoltageV = latestIna.shuntV;
+    power.currentA = latestIna.currentRegA;
+    power.powerW = latestIna.powerRegW;
+    power.valid = latestIna.valid;
+    power.errorCode = latestIna.valid ? 0 : 1;
+    linkSend(boat::Type::InaStatus, reinterpret_cast<uint8_t *>(&power), sizeof(power));
+    boat::VescTelemetryPayload motor{};
+    motor.timestampUs = lastVescRxUs;
+    motor.ageUs = controlAge(lastVescRxUs, now);
+    motor.inputVoltageV = vescValues.inputVoltageV;
+    motor.motorCurrentA = vescValues.motorCurrentA;
+    motor.inputCurrentA = vescValues.inputCurrentA;
+    motor.duty = vescValues.duty;
+    motor.erpm = vescValues.erpm;
+    motor.mosTempC = vescValues.mosTempC;
+    motor.motorTempC = vescValues.motorTempC;
+    motor.tachometer = vescValues.tachometer;
+    motor.valid = vescValues.valid;
+    motor.fault = vescValues.fault;
+    linkSend(boat::Type::VescTelemetry, reinterpret_cast<uint8_t *>(&motor), sizeof(motor));
+  }
   boat::ActuatorStatePayload actuators{};
   actuators.timestampUs = now;
   actuators.pwmWrites = competitionPwmWrites;
@@ -359,11 +608,14 @@ void sendProductionTelemetry(const boat::EstimatedStatePayload &estimated,
   actuators.safetyState = static_cast<uint8_t>(safety);
   actuators.controlMode = static_cast<uint8_t>(competitionController.mode());
   linkSend(boat::Type::ActuatorState, reinterpret_cast<uint8_t *>(&actuators), sizeof(actuators));
+  const bool inaFresh =
+      inaReady && latestIna.valid && lastInaUs && now - lastInaUs <= kPowerStateStaleUs;
   boat::SystemHealthPayload health{};
   health.timestampUs = now;
   health.flags = (input.imuValid ? 1u : 0u) | (input.tofValid ? 2u : 0u) |
                  (input.gnssValid ? 4u : 0u) | (input.powerValid ? 8u : 0u) |
-                 (input.vescValid ? 16u : 0u) | (input.heartbeat ? 32u : 0u);
+                 (input.vescValid ? 16u : 0u) | (input.heartbeat ? 32u : 0u) |
+                 (inaFresh ? 64u : 0u);
   health.imuAgeUs = controlAge(input.imuUs, now);
   health.tofAgeUs = controlAge(input.tofUs, now);
   health.gnssAgeUs = controlAge(input.gnssUs, now);
@@ -380,6 +632,10 @@ void runProductionControl() {
     return;
   const uint64_t now = nowUs();
   const auto estimated = controlState.snapshot(now);
+  if (safety != SafetyState::RUNNING) {
+    resetHydrofoilTransition();
+    resetGnssHeading();
+  }
   production_control::SensorInput input{};
   input.nowUs = now;
   input.safety = competitionSafety(safety);
@@ -422,6 +678,8 @@ void runProductionControl() {
   input.powerW = inaFresh ? latestIna.powerRegW : input.busVoltageV * input.currentA;
   input.vescErpm = vescValues.erpm;
   competitionOutput = competitionController.step(input);
+  applyImuYawLaunchGate(input, now);
+  applyHydrofoilTransition(input, now);
   if (competitionOutput.reason != production_control::StopReason::None)
     latchedCompetitionReason = competitionOutput.reason;
   if (competitionOutput.safetyRequest == production_control::SafetyRequest::Fault &&
@@ -432,7 +690,7 @@ void runProductionControl() {
              safety == SafetyState::RUNNING)
     stop();
   applyCompetitionActuators(competitionOutput, now);
-  if (millis() - lastCompetitionOutputTxMs >= 100) {
+  if (millis() - lastCompetitionOutputTxMs >= kControlStatusTxIntervalMs) {
     lastCompetitionOutputTxMs = millis();
     sendProductionTelemetry(estimated, input, now);
   }
@@ -477,6 +735,8 @@ void linkRxService() {
       processNav(legacy);
     } else if (type == boat::Type::WaypointSet)
       handleWaypointSet(frame);
+    else if (type == boat::Type::RuntimeTuning)
+      handleRuntimeTuning(frame);
     else if (type == boat::Type::ControlModeCommand || type == boat::Type::ManualCommand ||
              type == boat::Type::HeadingTarget)
       handleCompetitionCommand(frame);

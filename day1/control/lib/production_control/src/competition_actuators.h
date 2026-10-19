@@ -7,15 +7,13 @@ inline bool motorRelayRequired(float duty) {
   return std::isfinite(duty) && std::fabs(duty) > 0.0f;
 }
 
+// negative/center/positive are semantic endpoints.  Their numeric order is
+// deliberately unrestricted so mechanically reversed servos calibrate cleanly.
 struct ServoTuning {
-  float minUs, neutralUs, maxUs;
-  bool reversed;
+  float negativeUs, centerUs, positiveUs;
 
-  constexpr ServoTuning(float min = 1480.0f,
-                        float neutral = 1500.0f,
-                        float max = 1520.0f,
-                        bool reverse = false)
-      : minUs(min), neutralUs(neutral), maxUs(max), reversed(reverse) {
+  constexpr ServoTuning(float negative = 1480.0f, float center = 1500.0f, float positive = 1520.0f)
+      : negativeUs(negative), centerUs(center), positiveUs(positive) {
   }
 };
 
@@ -29,6 +27,15 @@ public:
   explicit ServoMapper(const ServoTuning &tuning = ServoTuning{});
   void reset();
   ServoResult map(float normalized);
+  bool setTuning(const ServoTuning &tuning);
+
+  const ServoTuning &tuning() const {
+    return tuning_;
+  }
+
+  bool validConfiguration() const {
+    return valid(tuning_);
+  }
 
   uint16_t previousPulseUs() const {
     return previousUs_;
@@ -62,6 +69,8 @@ public:
       : maximum_(maximum), riseSeconds_(riseSeconds), fallSeconds_(fallSeconds) {
   }
 
+  void setMaximum(float maximum);
+  void setRiseSeconds(float seconds);
   void setTarget(float duty);
   float step(float dtSeconds);
 
@@ -75,6 +84,10 @@ public:
 
   float applied() const {
     return applied_;
+  }
+
+  float maximum() const {
+    return maximum_;
   }
 
   bool active() const {

@@ -2,7 +2,9 @@ from pathlib import Path
 import os,subprocess,tempfile
 from verify_archive import ROOT,verify
 verify()
-for day in ('day1','day2'):
+subprocess.run(['python',str(ROOT/'day1/verification/run.py')],check=True)
+subprocess.run(['node',str(ROOT/'day1/verification/ui_test.js')],check=True)
+for day in ('day2',):
  cwd=ROOT/day
  with tempfile.TemporaryDirectory() as temp:
   specs=[('controller',['-Icontrol/lib/production_control/src','tests/controller_test.cpp','control/lib/production_control/src/production_control.cpp','control/lib/production_control/src/competition_actuators.cpp']),('state',['-Itests/stubs','-Icontrol/include','-Icontrol/lib/boat_protocol/src','tests/control_state_test.cpp','control/src/control_state.cpp']),('protocol',['-Icontrol/lib/production_control/src','-Icontrol/lib/boat_protocol/src','tests/protocol_test.cpp','control/lib/production_control/src/production_control.cpp','control/lib/production_control/src/command_ingress.cpp','control/lib/production_control/src/command_replay.cpp','control/lib/boat_protocol/src/boat_protocol.cpp']),('gnss',['-Itests/stubs','-Icommunication/include','tests/gnss_receiver_test.cpp','communication/src/gnss_receiver.cpp'])]

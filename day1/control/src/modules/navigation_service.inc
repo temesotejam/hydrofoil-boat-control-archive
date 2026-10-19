@@ -18,6 +18,55 @@ void sendCommandAck(const boat::Frame &f, uint8_t disposition, uint16_t reason) 
   linkSend(boat::Type::CommandAck, (uint8_t *)&ack, sizeof(ack));
 }
 
+float wrapGnssHeading(float value) {
+  while (value > PI)
+    value -= 2.0f * PI;
+  while (value < -PI)
+    value += 2.0f * PI;
+  return value;
+}
+
+void resetGnssHeading() {
+  gnssHeading = {};
+}
+
+void pushGnssHeading(float northM, float eastM, uint64_t timestampUs) {
+  GnssHeadingSample &sample = gnssHeading.samples[gnssHeading.next];
+  sample.northM = northM;
+  sample.eastM = eastM;
+  sample.timestampUs = timestampUs;
+  gnssHeading.next = (gnssHeading.next + 1) % kGnssHeadingWindowSamples;
+  if (gnssHeading.count < kGnssHeadingWindowSamples)
+    ++gnssHeading.count;
+  gnssHeading.valid = false;
+  if (gnssHeading.count < kGnssHeadingMinSamples)
+    return;
+  const uint8_t oldest = gnssHeading.count == kGnssHeadingWindowSamples ? gnssHeading.next : 0;
+  const uint8_t newest =
+      (gnssHeading.next + kGnssHeadingWindowSamples - 1) % kGnssHeadingWindowSamples;
+  const GnssHeadingSample &first = gnssHeading.samples[oldest];
+  const GnssHeadingSample &last = gnssHeading.samples[newest];
+  const float north = last.northM - first.northM, east = last.eastM - first.eastM;
+  const float seconds =
+      timestampUs > first.timestampUs ? (timestampUs - first.timestampUs) * 1.0e-6f : 0.0f;
+  if (seconds <= 0.0f)
+    return;
+  const float course = atan2f(east, north);
+  float rate = 0.0f;
+  if (gnssHeading.previousCourseValid && timestampUs > gnssHeading.previousCourseUs) {
+    const float dt = (timestampUs - gnssHeading.previousCourseUs) * 1.0e-6f;
+    if (dt > 0.0f)
+      rate = constrain(wrapGnssHeading(course - gnssHeading.previousCourseRad) / dt, -1.5f, 1.5f);
+  }
+  gnssHeading.courseRad = course;
+  gnssHeading.yawRateRadS = rate;
+  gnssHeading.timestampUs = timestampUs;
+  gnssHeading.previousCourseRad = course;
+  gnssHeading.previousCourseUs = timestampUs;
+  gnssHeading.previousCourseValid = true;
+  gnssHeading.valid = true;
+}
+
 void processNav(const boat::Frame &f) {
   boat::GnssNavPayload nav{};
   if (f.header.length != sizeof(nav)) {
@@ -75,6 +124,10 @@ void processNav(const boat::Frame &f) {
     navNorthM = result.northMm * .001f;
     navEastM = result.eastMm * .001f;
   }
+  if (navValid && navOriginSet && !duplicate)
+    pushGnssHeading(navNorthM, navEastM, navigation.timestampUs);
+  else if (!navValid)
+    resetGnssHeading();
   if (navValid)
     result.flags |= 1;
   result.errorCode = (flags & 8) ? 1 : 0;

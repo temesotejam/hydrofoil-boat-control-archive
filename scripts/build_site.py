@@ -5,9 +5,10 @@ from verify_archive import ROOT,verify
 
 def zip_sources(day,version,nodes,out):
  name='hydrofoil-'+day+('-'+nodes[0] if len(nodes)==1 else '-program')
- text=f'''水中翼ボート {version['label']} プログラム\n原典: https://github.com/temesotejam/2026_8_6\n対象コミット: {version['commit']}\n\n通信側と制御側は同じ日の版を組み合わせてください。\nC++の改行・インデント・空白を整えています。platformio.iniは原典のままです。\n'''
- if version.get('adaptation'):
-  text+='1日目は大会コースA→B→C→D→E→F→G→H→C→B→Aの一括送信に対応します。その他の制御・時間設定は1日目を維持しています。\n'
+ text=f'''水中翼ボート {version['label']} プログラム\n保存元: https://github.com/temesotejam/hydrofoil-boat-control-archive\n保存版の参照コミット: {version['commit']}\n\n通信側と制御側は同じ日の版を組み合わせてください。\nC++の改行・インデント・空白を整えています。platformio.iniは原典のままです。\n'''
+ text+='両日とも全11点の大会コースと円弧上の通過点生成に対応します。\n'
+ if day=='day1':text+='1日目：地磁気を使うIMU方位で操舵、制御出力LPFなし、状態通知100 ms。\n'
+ else:text+='2日目：GNSS位置変化の移動方向で操舵、制御出力LPFあり、状態通知2秒。\n'
  for node in nodes:
   command='.' if len(nodes)==1 else node
   text+=f'\n{node}: PlatformIOで{command}を開くか、展開先で python -m platformio run -d {command} -e production を実行してください。\n'
@@ -34,7 +35,7 @@ def main():
  (site/'downloads').mkdir();builds={}
  for day,version in info['versions'].items():
   for nodes in [('control','communication'),('control',),('communication',)]:zip_sources(day,version,nodes,site/'downloads')
-  variant=version.get('adaptation',{}).get('id','')
+  variant=version.get('variant','')
   build_id=version['commit'][:7]+('-'+variant if variant else '')
   builds[day]={'commit':version['commit'],'variant':variant,'label':version['label'],'firmware':{}}
   if args.sources_only:continue

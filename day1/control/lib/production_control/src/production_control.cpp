@@ -1,6 +1,7 @@
 #include "production_control.h"
 
 #include <cmath>
+#include <cstring>
 
 namespace production_control {
 namespace {
@@ -16,6 +17,176 @@ float wrap(float value) {
   while (value < -kPi)
     value += 2 * kPi;
   return value;
+}
+
+float mod2pi(float value) {
+  value = fmodf(value, 2 * kPi);
+  return value < 0 ? value + 2 * kPi : value;
+}
+
+struct Vec {
+  float x, y;
+}; // x=north, y=east: heading is atan2(y,x).
+
+Vec add(Vec a, Vec b) {
+  return {a.x + b.x, a.y + b.y};
+}
+
+Vec sub(Vec a, Vec b) {
+  return {a.x - b.x, a.y - b.y};
+}
+
+Vec mul(Vec a, float s) {
+  return {a.x * s, a.y * s};
+}
+
+float length(Vec a) {
+  return sqrtf(a.x * a.x + a.y * a.y);
+}
+
+Vec unit(Vec a) {
+  const float l = length(a);
+  return l > .0001f ? mul(a, 1.0f / l) : Vec{0, 0};
+}
+
+float angle(Vec a) {
+  return atan2f(a.y, a.x);
+}
+
+struct Pose {
+  float n, e, heading;
+};
+
+struct DubinsPlan {
+  float p[3]{};
+  float total = 0;
+  char type[4]{};
+  bool valid = false;
+};
+
+bool dubinsParams(float alpha, float beta, float d, const char *type, float out[3]) {
+  const float sa = sinf(alpha), sb = sinf(beta), ca = cosf(alpha), cb = cosf(beta),
+              cab = cosf(alpha - beta);
+  float tmp, p2, p;
+  if (!strcmp(type, "LSL")) {
+    tmp = d + sa - sb;
+    p2 = 2 + d * d - 2 * cab + 2 * d * (sa - sb);
+    if (p2 < 0)
+      return false;
+    tmp = atan2f(cb - ca, tmp);
+    out[0] = mod2pi(-alpha + tmp);
+    out[1] = sqrtf(p2);
+    out[2] = mod2pi(beta - tmp);
+    return true;
+  }
+  if (!strcmp(type, "RSR")) {
+    tmp = d - sa + sb;
+    p2 = 2 + d * d - 2 * cab + 2 * d * (-sa + sb);
+    if (p2 < 0)
+      return false;
+    tmp = atan2f(ca - cb, tmp);
+    out[0] = mod2pi(alpha - tmp);
+    out[1] = sqrtf(p2);
+    out[2] = mod2pi(-beta + tmp);
+    return true;
+  }
+  if (!strcmp(type, "LSR")) {
+    p2 = -2 + d * d + 2 * cab + 2 * d * (sa + sb);
+    if (p2 < 0)
+      return false;
+    p = sqrtf(p2);
+    tmp = atan2f(-ca - cb, d + sa + sb) - atan2f(-2.0f, p);
+    out[0] = mod2pi(-alpha + tmp);
+    out[1] = p;
+    out[2] = mod2pi(-beta + tmp);
+    return true;
+  }
+  if (!strcmp(type, "RSL")) {
+    p2 = -2 + d * d + 2 * cab - 2 * d * (sa + sb);
+    if (p2 < 0)
+      return false;
+    p = sqrtf(p2);
+    tmp = atan2f(ca + cb, d - sa - sb) - atan2f(2.0f, p);
+    out[0] = mod2pi(alpha - tmp);
+    out[1] = p;
+    out[2] = mod2pi(beta - tmp);
+    return true;
+  }
+  if (!strcmp(type, "RLR")) {
+    tmp = (6 - d * d + 2 * cab + 2 * d * (sa - sb)) / 8;
+    if (fabsf(tmp) > 1)
+      return false;
+    p = mod2pi(2 * kPi - acosf(tmp));
+    const float t = mod2pi(alpha - atan2f(ca - cb, d - sa + sb) + p / 2);
+    out[0] = t;
+    out[1] = p;
+    out[2] = mod2pi(alpha - beta - t + p);
+    return true;
+  }
+  if (!strcmp(type, "LRL")) {
+    tmp = (6 - d * d + 2 * cab + 2 * d * (-sa + sb)) / 8;
+    if (fabsf(tmp) > 1)
+      return false;
+    p = mod2pi(2 * kPi - acosf(tmp));
+    const float t = mod2pi(-alpha - atan2f(ca - cb, d + sa - sb) + p / 2);
+    out[0] = t;
+    out[1] = p;
+    out[2] = mod2pi(beta - alpha - t + p);
+    return true;
+  }
+  return false;
+}
+
+DubinsPlan dubinsPlan(const Pose &start, const Pose &target, float radius) {
+  const float dx = (target.n - start.n) / radius, dy = (target.e - start.e) / radius,
+              c = cosf(start.heading), s = sinf(start.heading);
+  const float x = c * dx + s * dy, y = -s * dx + c * dy, d = sqrtf(x * x + y * y),
+              th = atan2f(y, x), alpha = mod2pi(-th),
+              beta = mod2pi(wrap(target.heading - start.heading) - th);
+  const char *types[] = {"LSL", "RSR", "LSR", "RSL", "RLR", "LRL"};
+  DubinsPlan best{};
+  for (const char *type : types) {
+    float p[3]{};
+    if (!dubinsParams(alpha, beta, d, type, p))
+      continue;
+    const float total = (p[0] + p[1] + p[2]) * radius;
+    if (!best.valid || total < best.total) {
+      best.valid = true;
+      best.total = total;
+      memcpy(best.p, p, sizeof(p));
+      strcpy(best.type, type);
+    }
+  }
+  return best;
+}
+
+Pose poseOnDubins(const Pose &start, const DubinsPlan &plan, float distance) {
+  float n = 0, e = 0, h = 0;
+  // The caller supplies distance in metres; reconstruct radius from plan.total / normalised length.
+  const float units = plan.p[0] + plan.p[1] + plan.p[2];
+  const float radius = units > .0001f ? plan.total / units : 1.0f;
+  float remain = distance / radius;
+  for (uint8_t i = 0; i < 3 && remain > 0; ++i) {
+    const float take = fminf(remain, plan.p[i]);
+    const char m = plan.type[i];
+    if (m == 'S') {
+      n += take * cosf(h);
+      e += take * sinf(h);
+    } else if (m == 'L') {
+      n += sinf(h + take) - sinf(h);
+      e += -cosf(h + take) + cosf(h);
+      h = wrap(h + take);
+    } else {
+      n += sinf(h) - sinf(h - take);
+      e += cosf(h - take) - cosf(h);
+      h = wrap(h - take);
+    }
+    remain -= take;
+  }
+  const float c = cosf(start.heading), s = sinf(start.heading);
+  return Pose{start.n + radius * (c * n - s * e),
+              start.e + radius * (s * n + c * e),
+              wrap(start.heading + h)};
 }
 }
 
@@ -38,6 +209,12 @@ void Controller::reset() {
   segmentStartSet_ = false;
   waypointCount_ = activeWaypoint_ = 0;
   segmentStartNorth_ = segmentStartEast_ = 0;
+  competitionCourse_ = recovering_ = false;
+  competitionGateCount_ = activeCompetitionGate_ = recoveryGateCount_ = activeRecoveryGate_ =
+      recoveryRejoinGate_ = 0;
+  lastPositionValid_ = lastGnssValid_ = false;
+  lastGnssUs_ = recoveryCrossTrackStartUs_ = 0;
+  driftNorthMps_ = driftEastMps_ = lastCrossTrackM_ = 0;
   for (float &value : previous_)
     value = 0;
 }
@@ -87,7 +264,8 @@ CommandResult Controller::setHeading(float yawRad, uint32_t) {
 CommandResult Controller::setWaypoints(const Waypoint *points,
                                        uint8_t count,
                                        uint32_t,
-                                       AuthoritativeSafety safety) {
+                                       AuthoritativeSafety safety,
+                                       bool competitionCourse) {
   if (safety != AuthoritativeSafety::Disarmed || !points || !count || count > 16)
     return {Ack::Rejected, 5};
   for (uint8_t i = 0; i < count; ++i)
@@ -97,8 +275,21 @@ CommandResult Controller::setWaypoints(const Waypoint *points,
     waypoints_[i] = points[i];
   waypointCount_ = count;
   activeWaypoint_ = 0;
-  segmentStartSet_ = false;
+  competitionCourse_ = competitionCourse;
+  buildCompetitionGates();
+  resetNavigationState();
   return {Ack::Accepted, 0};
+}
+
+void Controller::resetNavigationState() {
+  activeWaypoint_ = 0;
+  activeCompetitionGate_ = 0;
+  recoveryGateCount_ = activeRecoveryGate_ = recoveryRejoinGate_ = 0;
+  recovering_ = false;
+  segmentStartSet_ = false;
+  lastPositionValid_ = lastGnssValid_ = false;
+  lastGnssUs_ = recoveryCrossTrackStartUs_ = 0;
+  driftNorthMps_ = driftEastMps_ = lastCrossTrackM_ = 0;
 }
 
 CommandResult Controller::setWaypointReachRadius(float radiusM, AuthoritativeSafety safety) {
@@ -107,6 +298,219 @@ CommandResult Controller::setWaypointReachRadius(float radiusM, AuthoritativeSaf
     return {Ack::Rejected, 6};
   config_.waypointReachM = radiusM;
   return {Ack::Accepted, 0};
+}
+
+void Controller::buildCompetitionGates() {
+  competitionGateCount_ = 0;
+  if (!competitionCourse_ || waypointCount_ != 11)
+    return;
+  const float radius = config_.competitionMinTurnRadiusM * config_.competitionGateRadiusFactor;
+  const float clearance = 4.0f;
+  constexpr uint8_t arcCount = 15, alignCount = 4;
+  auto addGate =
+      [this](float north, float east, float heading, uint8_t routeIndex, bool goal = false) {
+        if (competitionGateCount_ >= kMaxCompetitionGates)
+          return;
+        CompetitionGate &gate = competitionGates_[competitionGateCount_++];
+        gate.point.northM = north;
+        gate.point.eastM = east;
+        gate.headingRad = wrap(heading);
+        gate.routeIndex = routeIndex;
+        gate.goal = goal;
+      };
+
+  // The source simulator uses x=east/y=north.  Build in that frame, then
+  // convert headings back to this controller's north/east convention.
+  struct SimVec {
+    float x, y;
+  };
+
+  auto subV = [](SimVec a, SimVec b) {
+    return SimVec{a.x - b.x, a.y - b.y};
+  };
+  auto addV = [](SimVec a, SimVec b) {
+    return SimVec{a.x + b.x, a.y + b.y};
+  };
+  auto mulV = [](SimVec a, float s) {
+    return SimVec{a.x * s, a.y * s};
+  };
+  auto lenV = [](SimVec a) {
+    return sqrtf(a.x * a.x + a.y * a.y);
+  };
+  auto normV = [&](SimVec a) {
+    const float l = lenV(a);
+    return l > .001f ? mulV(a, 1.0f / l) : SimVec{0, 0};
+  };
+  auto angleV = [](SimVec a) {
+    return atan2f(a.y, a.x);
+  };
+  for (uint8_t i = 1; i + 1 < waypointCount_; ++i) {
+    const SimVec prev{waypoints_[i - 1].eastM, waypoints_[i - 1].northM},
+        p{waypoints_[i].eastM, waypoints_[i].northM},
+        next{waypoints_[i + 1].eastM, waypoints_[i + 1].northM};
+    const SimVec vin = normV(subV(p, prev)), vout = normV(subV(next, p));
+    SimVec b = addV(normV(subV(prev, p)), normV(subV(next, p)));
+    if (lenV(b) < .001f) {
+      const float cross = vin.x * vout.y - vin.y * vout.x;
+      b = {-vout.y * (cross >= 0 ? 1.0f : -1.0f), vout.x * (cross >= 0 ? 1.0f : -1.0f)};
+    }
+    const SimVec n = mulV(normV(b), -1.0f), contact = addV(p, mulV(n, clearance)),
+                 center = addV(p, mulV(n, clearance - radius));
+    const float centerAngle = angleV(subV(contact, center));
+    SimVec mean = normV(addV(vin, vout));
+    if (lenV(mean) < .001f)
+      mean = vout;
+    const float tangPlus = atan2f(cosf(centerAngle), -sinf(centerAngle)); // (-sin, cos)
+    const int orient =
+        fabsf(wrap(tangPlus - angleV(mean))) <= fabsf(wrap(tangPlus + kPi - angleV(mean))) ? 1 : -1;
+    const float thetaIn = angleV(vin) - orient * kPi * .5f,
+                thetaOut = angleV(vout) - orient * kPi * .5f;
+    float sIn = orient * wrap(thetaIn - centerAngle), sOut = orient * wrap(thetaOut - centerAngle);
+    if (sIn > 0)
+      sIn -= 2 * kPi;
+    if (sOut < 0)
+      sOut += 2 * kPi;
+    const float minHalf = kPi / 30.0f;
+    if (fabsf(sIn) < minHalf)
+      sIn = -minHalf;
+    if (fabsf(sOut) < minHalf)
+      sOut = minHalf;
+    SimVec last{0, 0};
+    float lastHeading = 0;
+    for (uint8_t k = 0; k < arcCount; ++k) {
+      const float q = static_cast<float>(k) / (arcCount - 1);
+      const float sweep = q <= .5f ? sIn * (1.0f - q / .5f) : sOut * ((q - .5f) / .5f);
+      const float theta = centerAngle + orient * sweep;
+      const SimVec now{center.x + radius * cosf(theta), center.y + radius * sinf(theta)};
+      if (k) {
+        const SimVec d = subV(now, last);
+        lastHeading = wrap(kPi * .5f - angleV(d));
+      }
+      last = now;
+      addGate(now.y, now.x, lastHeading, i);
+    }
+    // Update the previous arc point heading now that its successor is known.
+    const uint8_t first = competitionGateCount_ - arcCount;
+    for (uint8_t k = 0; k + 1 < arcCount; ++k) {
+      const auto &a = competitionGates_[first + k].point;
+      const auto &bpt = competitionGates_[first + k + 1].point;
+      competitionGates_[first + k].headingRad = atan2f(bpt.eastM - a.eastM, bpt.northM - a.northM);
+    }
+    if (i + 2 < waypointCount_) {
+      // Same cubic-Hermite alignment gates as the simulator, joining this arc
+      // to the next buoy arc once its start point is constructed below.
+      // They are inserted on the next pass after both endpoints are known.
+      const uint8_t nextIndex = i + 1;
+      const SimVec p2{waypoints_[nextIndex].eastM, waypoints_[nextIndex].northM};
+      const SimVec toward = normV(subV(p2, last));
+      for (uint8_t k = 1; k <= alignCount; ++k) {
+        const float t = static_cast<float>(k) / (alignCount + 1);
+        const float d = 160.0f * t;
+        const SimVec q = addV(last, mulV(toward, d));
+        addGate(q.y, q.x, wrap(kPi * .5f - angleV(toward)), i);
+      }
+    }
+  }
+  const Waypoint goal = waypoints_[waypointCount_ - 1];
+  const CompetitionGate &prior = competitionGates_[competitionGateCount_ - 1];
+  addGate(goal.northM,
+          goal.eastM,
+          atan2f(goal.eastM - prior.point.eastM, goal.northM - prior.point.northM),
+          waypointCount_ - 1,
+          true);
+}
+
+void Controller::updateDriftEstimate(const SensorInput &input) {
+  if (!competitionCourse_ || !input.gnssUs || input.gnssUs == lastGnssUs_)
+    return;
+  if (lastGnssValid_ && input.gnssUs > lastGnssUs_) {
+    const float dt = static_cast<float>(input.gnssUs - lastGnssUs_) * 1e-6f;
+    if (dt > .05f && dt < 3.0f) {
+      const float groundN = (input.northM - lastGnssNorth_) / dt,
+                  groundE = (input.eastM - lastGnssEast_) / dt;
+      const float ownN = config_.competitionCruiseSpeedMps * cosf(input.yawRad),
+                  ownE = config_.competitionCruiseSpeedMps * sinf(input.yawRad);
+      float measureN = groundN - ownN, measureE = groundE - ownE;
+      const float m = sqrtf(measureN * measureN + measureE * measureE);
+      if (m > config_.competitionDriftMaxMps) {
+        measureN *= config_.competitionDriftMaxMps / m;
+        measureE *= config_.competitionDriftMaxMps / m;
+      }
+      const float a = 1.0f - expf(-dt / config_.competitionDriftTauS);
+      driftNorthMps_ += a * (measureN - driftNorthMps_);
+      driftEastMps_ += a * (measureE - driftEastMps_);
+    }
+  }
+  lastGnssNorth_ = input.northM;
+  lastGnssEast_ = input.eastM;
+  lastGnssUs_ = input.gnssUs;
+  lastGnssValid_ = true;
+}
+
+bool Controller::competitionGatePassed(const SensorInput &input, const Output &output) const {
+  const CompetitionGate &gate =
+      recovering_ ? recoveryGates_[activeRecoveryGate_] : competitionGates_[activeCompetitionGate_];
+  const float near = gate.goal ? config_.waypointReachM : config_.competitionGateWidthM * 1.15f;
+  if (output.waypointDistanceM <= near)
+    return true;
+  if (!lastPositionValid_)
+    return false;
+  const float pn = lastPositionNorth_ - gate.point.northM,
+              pe = lastPositionEast_ - gate.point.eastM, cn = input.northM - gate.point.northM,
+              ce = input.eastM - gate.point.eastM;
+  const float alongPrev = pn * cosf(gate.headingRad) + pe * sinf(gate.headingRad),
+              alongNow = cn * cosf(gate.headingRad) + ce * sinf(gate.headingRad);
+  const float lateral = -sinf(gate.headingRad) * cn + cosf(gate.headingRad) * ce;
+  return alongPrev <= 0 && alongNow >= 0 && fabsf(lateral) < config_.competitionGateWidthM;
+}
+
+bool Controller::startDubinsRecovery(const SensorInput &input) {
+  if (!competitionCourse_ || recovering_ || !competitionGateCount_)
+    return false;
+  const uint8_t end =
+      static_cast<uint8_t>(fminf(competitionGateCount_ - 1, activeCompetitionGate_ + 14));
+  uint8_t best = activeCompetitionGate_;
+  float bestScore = INFINITY;
+  const Pose start{input.northM, input.eastM, input.yawRad};
+  for (uint8_t i = activeCompetitionGate_; i <= end; ++i) {
+    const auto &g = competitionGates_[i];
+    const Pose targetPose{g.point.northM, g.point.eastM, g.headingRad};
+    const DubinsPlan plan = dubinsPlan(start, targetPose, config_.competitionMinTurnRadiusM);
+    if (!plan.valid)
+      continue;
+    const float dn = g.point.northM - input.northM, de = g.point.eastM - input.eastM;
+    const float score = plan.total + 40.0f * fabsf(wrap(atan2f(de, dn) - input.yawRad)) +
+                        15.0f * (i - activeCompetitionGate_);
+    if (score < bestScore) {
+      bestScore = score;
+      best = i;
+    }
+  }
+  const auto &target = competitionGates_[best];
+  const Pose targetPose{target.point.northM, target.point.eastM, target.headingRad};
+  const DubinsPlan plan = dubinsPlan(start, targetPose, config_.competitionMinTurnRadiusM);
+  if (!plan.valid)
+    return false;
+  recoveryGateCount_ =
+      static_cast<uint8_t>(fminf(kMaxRecoveryGates, fmaxf(9.0f, ceilf(plan.total / 70.0f))));
+  for (uint8_t i = 0; i < recoveryGateCount_; ++i) {
+    const Pose p = poseOnDubins(
+        start, plan, plan.total * static_cast<float>(i + 1) / (recoveryGateCount_ + 1));
+    CompetitionGate &gate = recoveryGates_[i];
+    gate.point.northM = p.n;
+    gate.point.eastM = p.e;
+    gate.headingRad = p.heading;
+    gate.routeIndex = target.routeIndex;
+    gate.goal = false;
+  }
+  activeRecoveryGate_ = 0;
+  recoveryRejoinGate_ = best;
+  recovering_ = true;
+  activeWaypoint_ = target.routeIndex;
+  segmentStartNorth_ = input.northM;
+  segmentStartEast_ = input.eastM;
+  segmentStartSet_ = true;
+  return true;
 }
 
 bool Controller::physicalConfigurationValid(const PhysicalConfig &config) {
@@ -161,7 +565,10 @@ float Controller::waypointCourse(const SensorInput &input, Output &output) {
     segmentStartEast_ = input.eastM;
     segmentStartSet_ = true;
   }
-  const Waypoint &target = waypoints_[activeWaypoint_];
+  const Waypoint &target = competitionCourse_
+                               ? (recovering_ ? recoveryGates_[activeRecoveryGate_].point
+                                              : competitionGates_[activeCompetitionGate_].point)
+                               : waypoints_[activeWaypoint_];
   const float dn = target.northM - input.northM, de = target.eastM - input.eastM;
   output.waypointDistanceM = std::sqrt(dn * dn + de * de);
   const float pathN = target.northM - segmentStartNorth_, pathE = target.eastM - segmentStartEast_;
@@ -171,6 +578,30 @@ float Controller::waypointCourse(const SensorInput &input, Output &output) {
   const float pathCourse = std::atan2(pathE, pathN);
   const float relN = input.northM - segmentStartNorth_, relE = input.eastM - segmentStartEast_;
   const float crossTrack = -std::sin(pathCourse) * relN + std::cos(pathCourse) * relE;
+  lastCrossTrackM_ = crossTrack;
+  if (competitionCourse_) {
+    updateDriftEstimate(input);
+    float nearest = INFINITY;
+    for (uint8_t i = 0; i < waypointCount_; ++i) {
+      const float n = waypoints_[i].northM - input.northM, e = waypoints_[i].eastM - input.eastM;
+      nearest = fminf(nearest, sqrtf(n * n + e * e));
+    }
+    const float q = clampf(nearest / config_.competitionNearRadiusM, 0.0f, 1.0f);
+    float look = config_.competitionLookNearM * (1.0f - q) + config_.competitionLookFarM * q -
+                 config_.competitionLosErrorReduce * fabsf(crossTrack);
+    look = clampf(look,
+                  fmaxf(5.0f, config_.competitionLookNearM * .45f),
+                  fmaxf(config_.competitionLookFarM, config_.competitionLookNearM));
+    const float tangentN = cosf(pathCourse), tangentE = sinf(pathCourse),
+                normalN = -sinf(pathCourse), normalE = cosf(pathCourse);
+    const float crossVel = config_.competitionCruiseSpeedMps * crossTrack / look;
+    float desiredN =
+        config_.competitionCruiseSpeedMps * tangentN - crossVel * normalN - driftNorthMps_;
+    float desiredE =
+        config_.competitionCruiseSpeedMps * tangentE - crossVel * normalE - driftEastMps_;
+    if (fabsf(desiredN) + fabsf(desiredE) > .0001f)
+      return atan2f(desiredE, desiredN);
+  }
   return wrap(pathCourse - std::atan2(crossTrack, config_.losLookaheadM));
 }
 
@@ -179,8 +610,10 @@ Output Controller::step(const SensorInput &input) {
   output.safety = input.safety;
   output.mode = mode_;
   output.activeWaypoint = activeWaypoint_;
+  output.competitionCourse = competitionCourse_;
+  output.recovering = recovering_;
   if (input.safety != AuthoritativeSafety::Running) {
-    safe(output,
+      safe(output,
          input.safety == AuthoritativeSafety::EStop ? StopReason::EStop : StopReason::None,
          SafetyRequest::None);
     return output;
@@ -197,19 +630,19 @@ Output Controller::step(const SensorInput &input) {
     safe(output, StopReason::ManualTimeout, SafetyRequest::Disarm);
     return output;
   }
-  if (!manualMode && !fresh(input.imuValid, input.imuUs, input.nowUs, config_.imuStaleUs)) {
+  // Day1 waypoint steering uses IMU yaw even in WaypointOnly mode.
+  if ((attitudeControl || waypointMode) &&
+      !fresh(input.imuValid, input.imuUs, input.nowUs, config_.imuStaleUs)) {
     safe(output,
          input.imuValid ? StopReason::ImuStale : StopReason::ImuInvalid,
          SafetyRequest::Fault);
     return output;
   }
-  if (waypointMode && (!fresh(input.gnssValid, input.gnssUs, input.nowUs, config_.gnssStaleUs) ||
-                       !waypointCount_)) {
-    safe(output,
-         input.gnssValid ? StopReason::GnssStale : StopReason::GnssInvalid,
-         SafetyRequest::Fault);
-    return output;
-  }
+  const bool waypointNavigationReady =
+      waypointMode && fresh(input.gnssValid, input.gnssUs, input.nowUs, config_.gnssStaleUs) &&
+      waypointCount_;
+  if (waypointMode && !waypointNavigationReady)
+    output.reason = input.gnssValid ? StopReason::GnssStale : StopReason::GnssInvalid;
   // Disabled in the current human-monitored configuration. Keep the optional
   // trip behind an explicit setting so a later unattended operating profile
   // can restore it without changing controller logic.
@@ -258,19 +691,65 @@ Output Controller::step(const SensorInput &input) {
       output.leftPrelimit = 0;
       output.rightPrelimit = 0;
     }
-    if (waypointMode) {
+    if (waypointNavigationReady) {
       output.targetYaw = waypointCourse(input, output);
-      if (output.waypointDistanceM <= config_.waypointReachM) {
+      const bool reached = competitionCourse_ ? competitionGatePassed(input, output)
+                                              : output.waypointDistanceM <= config_.waypointReachM;
+      if (reached) {
         output.waypointReached = true;
-        segmentStartNorth_ = waypoints_[activeWaypoint_].northM;
-        segmentStartEast_ = waypoints_[activeWaypoint_].eastM;
-        if (++activeWaypoint_ >= waypointCount_) {
-          safe(output, StopReason::FinalWaypoint, SafetyRequest::Disarm);
-          return output;
+        if (competitionCourse_) {
+          const CompetitionGate &passed = recovering_ ? recoveryGates_[activeRecoveryGate_]
+                                                      : competitionGates_[activeCompetitionGate_];
+          segmentStartNorth_ = passed.point.northM;
+          segmentStartEast_ = passed.point.eastM;
+          if (recovering_) {
+            if (++activeRecoveryGate_ >= recoveryGateCount_) {
+              recovering_ = false;
+              activeCompetitionGate_ = recoveryRejoinGate_;
+            }
+          } else
+            ++activeCompetitionGate_;
+          if (!recovering_ && activeCompetitionGate_ >= competitionGateCount_) {
+            safe(output, StopReason::FinalWaypoint, SafetyRequest::Disarm);
+            return output;
+          }
+          if (!recovering_ && activeCompetitionGate_ >= competitionGateCount_) {
+            safe(output, StopReason::FinalWaypoint, SafetyRequest::Disarm);
+            return output;
+          }
+          activeWaypoint_ = recovering_ ? recoveryGates_[activeRecoveryGate_].routeIndex
+                                        : competitionGates_[activeCompetitionGate_].routeIndex;
+        } else {
+          segmentStartNorth_ = waypoints_[activeWaypoint_].northM;
+          segmentStartEast_ = waypoints_[activeWaypoint_].eastM;
+          if (++activeWaypoint_ >= waypointCount_) {
+            safe(output, StopReason::FinalWaypoint, SafetyRequest::Disarm);
+            return output;
+          }
         }
         output.activeWaypoint = activeWaypoint_;
         output.targetYaw = waypointCourse(input, output);
       }
+      if (competitionCourse_ && !recovering_) {
+        if (fabsf(lastCrossTrackM_) >= config_.competitionRecoveryCrossTrackM) {
+          if (!recoveryCrossTrackStartUs_)
+            recoveryCrossTrackStartUs_ = input.nowUs;
+          if (input.nowUs - recoveryCrossTrackStartUs_ >= config_.competitionRecoveryHoldUs &&
+              startDubinsRecovery(input)) {
+            output.recovering = true;
+            output.targetYaw = waypointCourse(input, output);
+          }
+        } else
+          recoveryCrossTrackStartUs_ = 0;
+      }
+      lastPositionNorth_ = input.northM;
+      lastPositionEast_ = input.eastM;
+      lastPositionValid_ = true;
+    } else if (waypointMode) {
+      // In degraded bench operation, retain any available attitude control but
+      // do not create a course command or propulsion without fresh GNSS.
+      output.targetYaw = input.yawRad;
+      output.propulsionPrelimit = 0;
     } else if (mode_ == ControlMode::HeadingHold) {
       if (!headingSet_) {
         targetYaw_ = wrap(input.yawRad);
@@ -289,9 +768,12 @@ Output Controller::step(const SensorInput &input) {
                  yawLimit);
       output.rearPrelimit = output.uYaw;
       output.flags |= YawScheduled;
-    } else
+    } else {
       output.rearPrelimit = manual_.rearYaw;
-    output.propulsionPrelimit = waypointMode ? config_.autoPropulsion : manual_.propulsion;
+    }
+    output.propulsionPrelimit = waypointMode
+                                    ? (waypointNavigationReady ? config_.autoPropulsion : 0.0f)
+                                    : manual_.propulsion;
   }
 
   if (!finite(output.leftPrelimit) || !finite(output.rightPrelimit) ||
@@ -310,10 +792,6 @@ Output Controller::step(const SensorInput &input) {
               : (!vescFresh
                      ? StopReason::VescStale
                      : (input.powerValid ? StopReason::PowerStale : StopReason::PowerInvalid));
-      if (waypointMode) {
-        safe(output, unavailable, SafetyRequest::Fault);
-        return output;
-      }
       output.propulsionPrelimit = 0;
       output.flags |= PropulsionUnavailable;
       output.reason = unavailable;
@@ -457,8 +935,10 @@ const char *reasonName(StopReason value) {
     return "ATTITUDE_DANGER";
   case StopReason::VescStale:
     return "VESC_STALE";
-  default:
+  case StopReason::Cavitation:
     return "CAVITATION";
+  default:
+    return "GNSS_HEADING_TIMEOUT";
   }
 }
 

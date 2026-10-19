@@ -66,7 +66,8 @@ enum class Type : uint8_t {
   ControlModeCommand = 68,
   ManualCommand = 69,
   HeadingTarget = 70,
-  ControlCommandAck = 71
+  ControlCommandAck = 71,
+  RuntimeTuning = 72
 };
 
 struct __attribute__((packed)) Header {
@@ -116,6 +117,8 @@ struct __attribute__((packed)) ControlSnapshotPayload {
       rearYawPrelimit, propulsionPrelimit;
   uint8_t gnssValid, imuValid, tofValid, heightValid, waypointReached, outputValid, state,
       safetyReason, mode, activeWaypoint, reserved[2];
+  float vescErpm;
+  uint8_t yawControlActive, yawCriteriaMask, vescLowErpmWarning, reservedYaw;
 };
 
 struct __attribute__((packed)) InaStatusPayload {
@@ -208,6 +211,19 @@ struct __attribute__((packed)) HeadingTargetPayload {
   uint32_t canonicalCrc;
 };
 
+struct __attribute__((packed)) RuntimeTuningCommandPayload {
+  uint8_t protocolVersion, reserved[3];
+  uint32_t requestId, commandSequence;
+  uint64_t sourceUs;
+  float kpPitch, kdPitch, kpRoll, kdRoll, pitchCommandCutoffHz, rollCommandCutoffHz,
+      heightCommandCutoffHz, yawCommandCutoffHz, kpHeight, kpYaw, kdYaw, targetHeightM, maxDuty,
+      vescRampRiseSeconds;
+  float leftUpDeg, leftMiddleDeg, leftDownDeg;
+  float rightUpDeg, rightMiddleDeg, rightDownDeg;
+  float rearLeftDeg, rearMiddleDeg, rearRightDeg;
+  uint32_t canonicalCrc;
+};
+
 struct __attribute__((packed)) ControlCommandAckPayload {
   uint32_t requestId, commandSequence;
   uint8_t commandType, disposition, safetyState, controlMode;
@@ -219,8 +235,9 @@ struct __attribute__((packed)) ControlCommandAckPayload {
 static_assert(sizeof(ControlModeCommandPayload) == 24, "ControlModeCommandPayload size");
 static_assert(sizeof(ManualCommandPayload) == 40, "ManualCommandPayload size");
 static_assert(sizeof(HeadingTargetPayload) == 28, "HeadingTargetPayload size");
+static_assert(sizeof(RuntimeTuningCommandPayload) == 116, "RuntimeTuningCommandPayload size");
 static_assert(sizeof(ControlCommandAckPayload) == 36, "ControlCommandAckPayload size");
-static_assert(sizeof(ControlSnapshotPayload) == 190, "ControlSnapshotPayload size");
+static_assert(sizeof(ControlSnapshotPayload) == 198, "ControlSnapshotPayload size");
 static_assert(sizeof(InaStatusPayload) == 32, "InaStatusPayload size");
 static_assert(sizeof(VescTelemetryPayload) == 48, "VescTelemetryPayload size");
 static_assert(sizeof(ActuatorStatePayload) == 36, "ActuatorStatePayload size");

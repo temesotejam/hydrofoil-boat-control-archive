@@ -160,6 +160,7 @@ void loop() {
       bench.maxLinkRxUs = elapsed;
   }
   linkHealth();
+  retryPeripheralSensors();
   pollTof();
   pollIna();
 
