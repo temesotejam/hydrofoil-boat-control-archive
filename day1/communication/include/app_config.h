@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+
 namespace app_config {
 constexpr char kFirmwareName[] = "xiao-telemetry-bridge";
 constexpr char kFirmwareVersion[] = "4.0.0-xiao-communication";

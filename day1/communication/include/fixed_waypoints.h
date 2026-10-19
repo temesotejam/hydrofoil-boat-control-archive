@@ -25,8 +25,8 @@ constexpr Point kPoints[] = {
 
 constexpr size_t kCount = sizeof(kPoints) / sizeof(kPoints[0]);
 
-inline const Point* byIndex(uint8_t index) {
+inline const Point *byIndex(uint8_t index) {
   return index < kCount ? &kPoints[index] : nullptr;
 }
 
-}  // namespace fixed_waypoints
+} // namespace fixed_waypoints

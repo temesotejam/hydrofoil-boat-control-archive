@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+
 namespace app_config {
 constexpr char kFirmwareName[] = "xiao-telemetry-bridge";
 constexpr char kFirmwareVersion[] = "4.0.0-xiao-communication";
@@ -15,7 +16,7 @@ constexpr int kSdCsPin = 21;
 constexpr uint32_t kSdSpiHz = 10000000UL;
 // Low-rate, power-loss-conscious logging: each completed record is flushed so
 // an abrupt power cut can affect at most the record currently being written.
-constexpr uint32_t kSdLogIntervalMs = 2000UL,kSdLogFlushEveryRecords = 1UL;
+constexpr uint32_t kSdLogIntervalMs = 2000UL, kSdLogFlushEveryRecords = 1UL;
 // The map page stores one coarse point every two minutes.  The current
 // position is sent separately at a low rate, so no recent high-rate trail is kept.
 constexpr uint32_t kTrackCoarseIntervalMs = 120000UL;

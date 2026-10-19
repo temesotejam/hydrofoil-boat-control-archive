@@ -5,7 +5,7 @@ from verify_archive import ROOT,verify
 
 def zip_sources(day,version,nodes,out):
  name='hydrofoil-'+day+('-'+nodes[0] if len(nodes)==1 else '-program')
- text=f'''水中翼ボート {version['label']} プログラム\n原典: https://github.com/temesotejam/2026_8_6\n対象コミット: {version['commit']}\n\n通信側と制御側は同じ日の版を組み合わせてください。\nプログラムの内容とplatformio.iniは原典のままです。\n'''
+ text=f'''水中翼ボート {version['label']} プログラム\n原典: https://github.com/temesotejam/2026_8_6\n対象コミット: {version['commit']}\n\n通信側と制御側は同じ日の版を組み合わせてください。\nC++の改行・インデント・空白を整えています。処理・設定値・文字列とplatformio.iniは原典のままです。\n'''
  for node in nodes:
   command='.' if len(nodes)==1 else node
   text+=f'\n{node}: PlatformIOで{command}を開くか、展開先で python -m platformio run -d {command} -e production を実行してください。\n'

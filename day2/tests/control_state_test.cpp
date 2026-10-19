@@ -22,7 +22,7 @@ Quaternion fromEuler(float roll, float pitch, float yaw) {
       cr * cp * cy + sr * sp * sy,
   };
 }
-}  // namespace
+} // namespace
 
 int main() {
   control_state::State state;
@@ -33,8 +33,7 @@ int main() {
   const float startPitch = -0.0099f;
   const float startYaw = -0.6844f;
   const Quaternion start = fromEuler(startRoll, startPitch, startYaw);
-  state.ingestRotation(1'000'000, 1'000'000, 3, start.x, start.y, start.z,
-                       start.w);
+  state.ingestRotation(1'000'000, 1'000'000, 3, start.x, start.y, start.z, start.w);
   auto snapshot = state.snapshot(1'000'000);
   assert(std::fabs(snapshot.rollRad) < kTolerance);
   assert(std::fabs(snapshot.pitchRad) < kTolerance);
@@ -42,10 +41,8 @@ int main() {
 
   // Later values are relative to that program-start pose in the established
   // boat convention: roll=standard pitch, pitch=-standard roll.
-  const Quaternion moved =
-      fromEuler(startRoll - .10f, startPitch + .05f, startYaw + .20f);
-  state.ingestRotation(1'100'000, 1'100'000, 3, moved.x, moved.y, moved.z,
-                       moved.w);
+  const Quaternion moved = fromEuler(startRoll - .10f, startPitch + .05f, startYaw + .20f);
+  state.ingestRotation(1'100'000, 1'100'000, 3, moved.x, moved.y, moved.z, moved.w);
   snapshot = state.snapshot(1'100'000);
   assert(std::fabs(snapshot.rollRad - .05f) < kTolerance);
   assert(std::fabs(snapshot.pitchRad - .10f) < kTolerance);

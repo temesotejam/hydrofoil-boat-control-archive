@@ -135,45 +135,71 @@ ManualValues manualValues{};
 OperationConfig operation{};
 char operationMessage[96] = "停止中です。";
 
-uint64_t nowUs() { return static_cast<uint64_t>(esp_timer_get_time()); }
+uint64_t nowUs() {
+  return static_cast<uint64_t>(esp_timer_get_time());
+}
 
 uint32_t ageMs(uint64_t timestampUs, uint64_t currentUs) {
-  if (!timestampUs || currentUs < timestampUs) return UINT32_MAX;
+  if (!timestampUs || currentUs < timestampUs)
+    return UINT32_MAX;
   const uint64_t age = (currentUs - timestampUs) / 1000ULL;
   return age > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(age);
 }
 
-const char* stageName(Stage value) {
+const char *stageName(Stage value) {
   switch (value) {
-    case Stage::Idle: return "idle";
-    case Stage::EnsureDisarmed: return "ensure_disarmed";
-    case Stage::WaitWaypointAck: return "wait_waypoint_ack";
-    case Stage::WaitModeAck: return "wait_mode_ack";
-    case Stage::WaitManualAck: return "wait_manual_ack";
-    case Stage::WaitArmed: return "wait_armed";
-    case Stage::WaitRunning: return "wait_running";
-    case Stage::Running: return "running";
-    case Stage::Stopping: return "stopping";
-    case Stage::Emergency: return "emergency";
-    case Stage::ClearingEmergency: return "clearing_emergency";
-    case Stage::Error: return "error";
+  case Stage::Idle:
+    return "idle";
+  case Stage::EnsureDisarmed:
+    return "ensure_disarmed";
+  case Stage::WaitWaypointAck:
+    return "wait_waypoint_ack";
+  case Stage::WaitModeAck:
+    return "wait_mode_ack";
+  case Stage::WaitManualAck:
+    return "wait_manual_ack";
+  case Stage::WaitArmed:
+    return "wait_armed";
+  case Stage::WaitRunning:
+    return "wait_running";
+  case Stage::Running:
+    return "running";
+  case Stage::Stopping:
+    return "stopping";
+  case Stage::Emergency:
+    return "emergency";
+  case Stage::ClearingEmergency:
+    return "clearing_emergency";
+  case Stage::Error:
+    return "error";
   }
   return "unknown";
 }
 
-const char* modeName(uint8_t value) {
+const char *modeName(uint8_t value) {
   switch (value) {
-    case boat::ControlManual: return "MANUAL";
-    case boat::ControlAttitudeAssist: return "ATTITUDE_ASSIST";
-    case boat::ControlHeadingHold: return "HEADING_HOLD";
-    case boat::ControlAutoWaypoint: return "AUTO_WAYPOINT_ATTITUDE";
-    case boat::ControlWaypointOnly: return "AUTO_WAYPOINT_ONLY";
-    default: return "UNKNOWN";
+  case boat::ControlManual:
+    return "MANUAL";
+  case boat::ControlAttitudeAssist:
+    return "ATTITUDE_ASSIST";
+  case boat::ControlHeadingHold:
+    return "HEADING_HOLD";
+  case boat::ControlAutoWaypoint:
+    return "AUTO_WAYPOINT_ATTITUDE";
+  case boat::ControlWaypointOnly:
+    return "AUTO_WAYPOINT_ONLY";
+  default:
+    return "UNKNOWN";
   }
 }
 
-bool usesWaypoint() { return operation.waypointEnabled; }
-bool usesManualRefresh() { return !operation.waypointEnabled; }
+bool usesWaypoint() {
+  return operation.waypointEnabled;
+}
+
+bool usesManualRefresh() {
+  return !operation.waypointEnabled;
+}
 
 uint8_t selectedMode(bool waypointEnabled, bool attitudeEnabled) {
   if (waypointEnabled) {
@@ -182,55 +208,86 @@ uint8_t selectedMode(bool waypointEnabled, bool attitudeEnabled) {
   return attitudeEnabled ? boat::ControlAttitudeAssist : boat::ControlManual;
 }
 
-const char* safetyName(uint8_t value) {
+const char *safetyName(uint8_t value) {
   switch (value) {
-    case 0: return "BOOT";
-    case 1: return "DISARMED";
-    case 2: return "ARMED";
-    case 3: return "RUNNING";
-    case 4: return "E-STOP";
-    case 5: return "FAULT";
-    default: return "UNKNOWN";
+  case 0:
+    return "BOOT";
+  case 1:
+    return "DISARMED";
+  case 2:
+    return "ARMED";
+  case 3:
+    return "RUNNING";
+  case 4:
+    return "E-STOP";
+  case 5:
+    return "FAULT";
+  default:
+    return "UNKNOWN";
   }
 }
 
-const char* stopReasonName(uint8_t value) {
+const char *stopReasonName(uint8_t value) {
   switch (value) {
-    case 0: return "NONE";
-    case 1: return "STOP";
-    case 2: return "E_STOP";
-    case 3: return "HEARTBEAT";
-    case 4: return "MANUAL_TIMEOUT";
-    case 5: return "IMU_INVALID";
-    case 6: return "IMU_STALE";
-    case 7: return "TOF_INVALID";
-    case 8: return "TOF_STALE";
-    case 9: return "GNSS_INVALID";
-    case 10: return "GNSS_STALE";
-    case 11: return "VESC_FAULT";
-    case 12: return "NONFINITE";
-    case 13: return "FINAL_WAYPOINT";
-    case 14: return "POWER_INVALID";
-    case 15: return "POWER_STALE";
-    case 16: return "LOW_VOLTAGE";
-    case 17: return "OVER_CURRENT";
-    case 18: return "MOTOR_STALL";
-    case 19: return "ATTITUDE_DANGER";
-    case 20: return "VESC_STALE";
-    case 21: return "CAVITATION";
-    default: return "UNKNOWN";
+  case 0:
+    return "NONE";
+  case 1:
+    return "STOP";
+  case 2:
+    return "E_STOP";
+  case 3:
+    return "HEARTBEAT";
+  case 4:
+    return "MANUAL_TIMEOUT";
+  case 5:
+    return "IMU_INVALID";
+  case 6:
+    return "IMU_STALE";
+  case 7:
+    return "TOF_INVALID";
+  case 8:
+    return "TOF_STALE";
+  case 9:
+    return "GNSS_INVALID";
+  case 10:
+    return "GNSS_STALE";
+  case 11:
+    return "VESC_FAULT";
+  case 12:
+    return "NONFINITE";
+  case 13:
+    return "FINAL_WAYPOINT";
+  case 14:
+    return "POWER_INVALID";
+  case 15:
+    return "POWER_STALE";
+  case 16:
+    return "LOW_VOLTAGE";
+  case 17:
+    return "OVER_CURRENT";
+  case 18:
+    return "MOTOR_STALL";
+  case 19:
+    return "ATTITUDE_DANGER";
+  case 20:
+    return "VESC_STALE";
+  case 21:
+    return "CAVITATION";
+  default:
+    return "UNKNOWN";
   }
 }
 
-void setMessage(const char* text) {
+void setMessage(const char *text) {
   snprintf(operationMessage, sizeof(operationMessage), "%s", text ? text : "");
 }
 
-void setStage(Stage next, const char* message) {
+void setStage(Stage next, const char *message) {
   stage = next;
   stageStartedMs = millis();
   lastSafetyMs = 0;
-  if (message) setMessage(message);
+  if (message)
+    setMessage(message);
 }
 
 LinkCache cacheSnapshot() {
@@ -241,53 +298,67 @@ LinkCache cacheSnapshot() {
   return copy;
 }
 
-bool linkConnected(const LinkCache& cache) {
+bool linkConnected(const LinkCache &cache) {
   return cache.lastFrameUs && ageMs(cache.lastFrameUs, nowUs()) <= kLinkFreshMs;
 }
 
-uint8_t currentSafety(const LinkCache& cache) {
-  if (cache.hasActuators) return cache.actuators.safetyState;
-  if (cache.hasOutput) return cache.output.safety;
-  if (cache.hasHealth) return cache.health.safetyState;
+uint8_t currentSafety(const LinkCache &cache) {
+  if (cache.hasActuators)
+    return cache.actuators.safetyState;
+  if (cache.hasOutput)
+    return cache.output.safety;
+  if (cache.hasHealth)
+    return cache.health.safetyState;
   return 0;
 }
 
-uint8_t currentStopReason(const LinkCache& cache) {
-  if (cache.hasOutput && cache.output.stopReason) return cache.output.stopReason;
-  if (cache.hasHealth && cache.health.stopReason) return cache.health.stopReason;
-  if (cache.hasSnapshot && cache.snapshot.safetyReason) return cache.snapshot.safetyReason;
+uint8_t currentStopReason(const LinkCache &cache) {
+  if (cache.hasOutput && cache.output.stopReason)
+    return cache.output.stopReason;
+  if (cache.hasHealth && cache.health.stopReason)
+    return cache.health.stopReason;
+  if (cache.hasSnapshot && cache.snapshot.safetyReason)
+    return cache.snapshot.safetyReason;
   return cache.latchedStopReason;
 }
 
-bool sendFrame(boat::Type type, const void* payload, uint16_t length) {
-  boat::Header header{boat::kVersion, static_cast<uint8_t>(type), length,
-                      ++frameSequence, bootId, nowUs(), 0};
+bool sendFrame(boat::Type type, const void *payload, uint16_t length) {
+  boat::Header header{
+      boat::kVersion, static_cast<uint8_t>(type), length, ++frameSequence, bootId, nowUs(), 0};
   uint8_t encoded[boat::kMaxEncoded]{};
-  const size_t bytes = boat::encode(
-      header, static_cast<const uint8_t*>(payload), encoded, sizeof(encoded));
+  const size_t bytes =
+      boat::encode(header, static_cast<const uint8_t *>(payload), encoded, sizeof(encoded));
   return bytes && controlUart.write(encoded, bytes) == bytes;
 }
 
 bool gnssFixFresh() {
-  const auto& fix = gnssRx.latest();
+  const auto &fix = gnssRx.latest();
   const uint32_t required = gnss::FixValid | gnss::LatitudeValid | gnss::LongitudeValid;
   return (fix.flags & required) == required && fix.lastValidFixUs &&
          ageMs(fix.lastValidFixUs, nowUs()) <= kGnssFixFreshMs;
 }
 
 boat::GnssNavV2Payload makeGnssNav() {
-  const auto& fix = gnssRx.latest();
+  const auto &fix = gnssRx.latest();
   boat::GnssNavV2Payload nav{};
   nav.navSequence = ++gnssNavSequence;
   nav.fixSequence = gnssFixSequence;
-  if (gnssFixFresh()) nav.flags |= boat::NavFixValid;
-  if (gnssNewFix) nav.flags |= boat::NavNewFix;
-  if (fix.flags & gnss::LatitudeValid) nav.flags |= boat::NavLatValid;
-  if (fix.flags & gnss::LongitudeValid) nav.flags |= boat::NavLonValid;
-  if (fix.flags & gnss::AltitudeValid) nav.flags |= boat::NavAltitudeValid;
-  if (fix.flags & gnss::SpeedValid) nav.flags |= boat::NavSpeedValid;
-  if (fix.flags & gnss::CourseValid) nav.flags |= boat::NavCourseValid;
-  if (fix.flags & gnss::HdopValid) nav.flags |= boat::NavHdopValid;
+  if (gnssFixFresh())
+    nav.flags |= boat::NavFixValid;
+  if (gnssNewFix)
+    nav.flags |= boat::NavNewFix;
+  if (fix.flags & gnss::LatitudeValid)
+    nav.flags |= boat::NavLatValid;
+  if (fix.flags & gnss::LongitudeValid)
+    nav.flags |= boat::NavLonValid;
+  if (fix.flags & gnss::AltitudeValid)
+    nav.flags |= boat::NavAltitudeValid;
+  if (fix.flags & gnss::SpeedValid)
+    nav.flags |= boat::NavSpeedValid;
+  if (fix.flags & gnss::CourseValid)
+    nav.flags |= boat::NavCourseValid;
+  if (fix.flags & gnss::HdopValid)
+    nav.flags |= boat::NavHdopValid;
   nav.latitudeE7 = lround(fix.latitude * 1e7);
   nav.longitudeE7 = lround(fix.longitude * 1e7);
   nav.altitudeMm = lround(fix.altitudeM * 1000.0f);
@@ -299,21 +370,21 @@ boat::GnssNavV2Payload makeGnssNav() {
   nav.generatedUs = nowUs();
   nav.measurementUs = fix.lastValidFixUs ? fix.lastValidFixUs : nav.generatedUs;
   nav.sourceBootId = bootId;
-  nav.canonicalCrc = boat::canonicalCrc(
-      &nav, offsetof(boat::GnssNavV2Payload, canonicalCrc));
+  nav.canonicalCrc = boat::canonicalCrc(&nav, offsetof(boat::GnssNavV2Payload, canonicalCrc));
   return nav;
 }
 
 void serviceGnss() {
   for (uint16_t count = 0; count < kGnssReadBudgetBytes && gnssUart.available(); ++count) {
     const int value = gnssUart.read();
-    if (value < 0) break;
+    if (value < 0)
+      break;
     gnss::Sentence sentence{};
     if (gnssRx.feed(static_cast<char>(value), nowUs(), sentence)) {
       ++gnssSentences;
-      if (!sentence.checksumValid) ++gnssChecksumErrors;
-      if (sentence.parsed &&
-          (!strcmp(sentence.type, "RMC") || !strcmp(sentence.type, "GGA")) &&
+      if (!sentence.checksumValid)
+        ++gnssChecksumErrors;
+      if (sentence.parsed && (!strcmp(sentence.type, "RMC") || !strcmp(sentence.type, "GGA")) &&
           gnssFixFresh()) {
         ++gnssFixSequence;
         gnssNewFix = true;
@@ -335,9 +406,12 @@ void initializePersistentCounters() {
   uint32_t request = preferences.getUInt("request", 0);
   uint32_t sequence = preferences.getUInt("sequence", 0);
   uint32_t waypointRevision = preferences.getUInt("wp_revision", 0);
-  if (!request) request = esp_random() | 1U;
-  if (!sequence) sequence = esp_random() | 1U;
-  if (!waypointRevision) waypointRevision = esp_random() | 1U;
+  if (!request)
+    request = esp_random() | 1U;
+  if (!sequence)
+    sequence = esp_random() | 1U;
+  if (!waypointRevision)
+    waypointRevision = esp_random() | 1U;
   constexpr uint32_t kReservation = 0x01000000UL;
   constexpr uint32_t kWaypointReservation = 0x00010000UL;
   preferences.putUInt("request", request + kReservation);
@@ -351,24 +425,31 @@ void initializePersistentCounters() {
 
 constexpr uint8_t kAllManualMask = boat::ManualAll;
 
-boat::ManualCommandPayload makeManual(uint8_t mask, const ManualValues& values) {
+boat::ManualCommandPayload makeManual(uint8_t mask, const ManualValues &values) {
   boat::ManualCommandPayload command{};
   command.protocolVersion = boat::kVersion;
   command.reserved[0] = mask;
   command.requestId = requestIdNext++;
   command.commandSequence = commandSequenceNext++;
   command.sourceUs = nowUs();
-  if (mask & boat::ManualLeft) command.leftFrontWing = values.left;
-  if (mask & boat::ManualRight) command.rightFrontWing = values.right;
-  if (mask & boat::ManualRear) command.rearYaw = values.rear;
-  if (mask & boat::ManualPropulsion) command.propulsion = values.propulsion;
-  command.canonicalCrc = boat::canonicalCrc(
-      &command, offsetof(boat::ManualCommandPayload, canonicalCrc));
+  if (mask & boat::ManualLeft)
+    command.leftFrontWing = values.left;
+  if (mask & boat::ManualRight)
+    command.rightFrontWing = values.right;
+  if (mask & boat::ManualRear)
+    command.rearYaw = values.rear;
+  if (mask & boat::ManualPropulsion)
+    command.propulsion = values.propulsion;
+  command.canonicalCrc =
+      boat::canonicalCrc(&command, offsetof(boat::ManualCommandPayload, canonicalCrc));
   return command;
 }
 
-void beginPending(boat::Type type, const void* payload, uint16_t length,
-                  uint32_t requestId, uint32_t commandSequence) {
+void beginPending(boat::Type type,
+                  const void *payload,
+                  uint16_t length,
+                  uint32_t requestId,
+                  uint32_t commandSequence) {
   pending = {};
   pending.type = type;
   pending.length = length;
@@ -390,14 +471,17 @@ void beginModeCommand() {
   command.requestId = requestIdNext++;
   command.commandSequence = commandSequenceNext++;
   command.sourceUs = nowUs();
-  command.canonicalCrc = boat::canonicalCrc(
-      &command, offsetof(boat::ControlModeCommandPayload, canonicalCrc));
-  beginPending(boat::Type::ControlModeCommand, &command, sizeof(command),
-               command.requestId, command.commandSequence);
+  command.canonicalCrc =
+      boat::canonicalCrc(&command, offsetof(boat::ControlModeCommandPayload, canonicalCrc));
+  beginPending(boat::Type::ControlModeCommand,
+               &command,
+               sizeof(command),
+               command.requestId,
+               command.commandSequence);
 }
 
 void beginWaypointCommand() {
-  const fixed_waypoints::Point* point = fixed_waypoints::byIndex(operation.targetIndex);
+  const fixed_waypoints::Point *point = fixed_waypoints::byIndex(operation.targetIndex);
   if (!point) {
     pending.active = false;
     setMessage("固定ウェイポイントの選択が不正です。");
@@ -411,16 +495,19 @@ void beginWaypointCommand() {
   command.reachRadiusM = kWaypointReachRadiusM;
   command.points[0].latitudeDeg = point->latitudeDeg;
   command.points[0].longitudeDeg = point->longitudeDeg;
-  command.canonicalCrc = boat::canonicalCrc(
-      &command, offsetof(boat::WaypointSetPayload, canonicalCrc));
-  beginPending(boat::Type::WaypointSet, &command, sizeof(command),
-               command.requestId, command.revision);
+  command.canonicalCrc =
+      boat::canonicalCrc(&command, offsetof(boat::WaypointSetPayload, canonicalCrc));
+  beginPending(
+      boat::Type::WaypointSet, &command, sizeof(command), command.requestId, command.revision);
 }
 
 void beginManualCommand() {
   const boat::ManualCommandPayload command = makeManual(kAllManualMask, manualValues);
-  beginPending(boat::Type::ManualCommand, &command, sizeof(command),
-               command.requestId, command.commandSequence);
+  beginPending(boat::Type::ManualCommand,
+               &command,
+               sizeof(command),
+               command.requestId,
+               command.commandSequence);
 }
 
 void sendManualRefresh() {
@@ -437,23 +524,28 @@ void sendManualOff() {
 
 void sendSafety(boat::Type type) {
   boat::CommandPayload command{++safetyCommandId, static_cast<uint8_t>(type), {0, 0, 0}};
-  if (sendFrame(type, &command, sizeof(command))) lastSafetyMs = millis();
+  if (sendFrame(type, &command, sizeof(command)))
+    lastSafetyMs = millis();
 }
 
 // Returns 1 when accepted, -1 when rejected/timed out, and 0 while waiting.
-int servicePending(const LinkCache& cache) {
-  if (!pending.active) return -1;
+int servicePending(const LinkCache &cache) {
+  if (!pending.active)
+    return -1;
   if (pending.type == boat::Type::WaypointSet && cache.hasWaypointAck &&
       cache.waypointAck.requestId == pending.requestId &&
       cache.waypointAck.revision == pending.commandSequence) {
-    const bool crcOk = cache.waypointAck.canonicalCrc == boat::canonicalCrc(
-        &cache.waypointAck, offsetof(boat::WaypointAckPayload, canonicalCrc));
+    const bool crcOk =
+        cache.waypointAck.canonicalCrc ==
+        boat::canonicalCrc(&cache.waypointAck, offsetof(boat::WaypointAckPayload, canonicalCrc));
     pending.active = false;
     if (crcOk && (cache.waypointAck.status == 0 || cache.waypointAck.status == 2)) {
       return 1;
     }
     char message[96];
-    snprintf(message, sizeof(message), "XIAOがウェイポイントを拒否しました（理由%u）。",
+    snprintf(message,
+             sizeof(message),
+             "XIAOがウェイポイントを拒否しました（理由%u）。",
              static_cast<unsigned>(cache.waypointAck.reason));
     setMessage(message);
     return -1;
@@ -467,7 +559,9 @@ int servicePending(const LinkCache& cache) {
       return 1;
     }
     char message[96];
-    snprintf(message, sizeof(message), "XIAOが指令を拒否しました（理由%u）。",
+    snprintf(message,
+             sizeof(message),
+             "XIAOが指令を拒否しました（理由%u）。",
              static_cast<unsigned>(cache.commandAck.reason));
     setMessage(message);
     return -1;
@@ -489,7 +583,7 @@ int servicePending(const LinkCache& cache) {
   return 0;
 }
 
-void failOperation(const char* message) {
+void failOperation(const char *message) {
   char savedMessage[sizeof(operationMessage)];
   snprintf(savedMessage, sizeof(savedMessage), "%s", message ? message : operationMessage);
   pending.active = false;
@@ -498,12 +592,11 @@ void failOperation(const char* message) {
   setStage(Stage::Error, savedMessage);
 }
 
-void failSafetyOperation(const LinkCache& cache, const char* phase) {
+void failSafetyOperation(const LinkCache &cache, const char *phase) {
   char message[sizeof(operationMessage)];
   const uint8_t reason = currentStopReason(cache);
   if (reason) {
-    snprintf(message, sizeof(message), "%s中に安全停止: %s", phase,
-             stopReasonName(reason));
+    snprintf(message, sizeof(message), "%s中に安全停止: %s", phase, stopReasonName(reason));
   } else if (cache.hasActuators && cache.actuators.pwmErrors) {
     snprintf(message, sizeof(message), "%s中に安全停止: PCA9685_WRITE", phase);
   } else {
@@ -530,176 +623,177 @@ void serviceOperation() {
   }
 
   switch (stage) {
-    case Stage::Idle:
-      return;
+  case Stage::Idle:
+    return;
 
-    case Stage::Error:
-      if (connected && safety != 1 && safety != 4 &&
-          (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs)) {
-        sendSafety(boat::Type::Stop);
-        sendManualOff();
-      }
-      return;
+  case Stage::Error:
+    if (connected && safety != 1 && safety != 4 &&
+        (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs)) {
+      sendSafety(boat::Type::Stop);
+      sendManualOff();
+    }
+    return;
 
-    case Stage::EnsureDisarmed:
-      if (safety == 4) {
-        failOperation("緊急停止中です。解除してから開始してください。");
-      } else if (safety == 1) {
-        if (usesWaypoint()) {
-          beginWaypointCommand();
-          setStage(Stage::WaitWaypointAck, "固定ウェイポイントをXIAOへ設定しています。");
-        } else {
-          beginModeCommand();
-          setStage(Stage::WaitModeAck, "制御モードを設定しています。");
-        }
-      } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
-        sendSafety(boat::Type::Stop);
-        if (current - stageStartedMs > kSafetyTimeoutMs) {
-          failOperation("XIAOをDISARMEDにできませんでした。");
-        }
-      }
-      return;
-
-    case Stage::WaitWaypointAck: {
-      const int result = servicePending(cache);
-      if (result > 0) {
+  case Stage::EnsureDisarmed:
+    if (safety == 4) {
+      failOperation("緊急停止中です。解除してから開始してください。");
+    } else if (safety == 1) {
+      if (usesWaypoint()) {
+        beginWaypointCommand();
+        setStage(Stage::WaitWaypointAck, "固定ウェイポイントをXIAOへ設定しています。");
+      } else {
         beginModeCommand();
-        setStage(Stage::WaitModeAck, "自動航法モードを設定しています。");
-      } else if (result < 0) {
-        failOperation(operationMessage);
+        setStage(Stage::WaitModeAck, "制御モードを設定しています。");
       }
-      return;
-    }
-
-    case Stage::WaitModeAck: {
-      const int result = servicePending(cache);
-      if (result > 0) {
-        if (usesManualRefresh()) {
-          beginManualCommand();
-          setStage(Stage::WaitManualAck, "手動入力値を設定しています。");
-        } else {
-          sendManualOff();
-          sendSafety(boat::Type::Arm);
-          setStage(Stage::WaitArmed, "ARMの成立を待っています。");
-        }
-      } else if (result < 0) {
-        failOperation(operationMessage);
+    } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
+      sendSafety(boat::Type::Stop);
+      if (current - stageStartedMs > kSafetyTimeoutMs) {
+        failOperation("XIAOをDISARMEDにできませんでした。");
       }
-      return;
     }
+    return;
 
-    case Stage::WaitManualAck: {
-      const int result = servicePending(cache);
-      if (result > 0) {
-        lastManualMs = current;
+  case Stage::WaitWaypointAck: {
+    const int result = servicePending(cache);
+    if (result > 0) {
+      beginModeCommand();
+      setStage(Stage::WaitModeAck, "自動航法モードを設定しています。");
+    } else if (result < 0) {
+      failOperation(operationMessage);
+    }
+    return;
+  }
+
+  case Stage::WaitModeAck: {
+    const int result = servicePending(cache);
+    if (result > 0) {
+      if (usesManualRefresh()) {
+        beginManualCommand();
+        setStage(Stage::WaitManualAck, "手動入力値を設定しています。");
+      } else {
+        sendManualOff();
         sendSafety(boat::Type::Arm);
         setStage(Stage::WaitArmed, "ARMの成立を待っています。");
-      } else if (result < 0) {
-        failOperation(operationMessage);
       }
-      return;
+    } else if (result < 0) {
+      failOperation(operationMessage);
     }
+    return;
+  }
 
-    case Stage::WaitArmed:
-      if (usesManualRefresh()) keepManualFresh();
-      if (safety == 2) {
-        sendSafety(boat::Type::StartTest);
-        setStage(Stage::WaitRunning, "STARTの成立を待っています。");
-      } else if (safety == 4) {
-        failOperation("ARM中に緊急停止になりました。");
-      } else if (current - stageStartedMs > kSafetyTimeoutMs) {
-        failOperation("ARMできませんでした。PCA9685と配線を確認してください。");
-      } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
-        sendSafety(boat::Type::Arm);
-      }
-      return;
+  case Stage::WaitManualAck: {
+    const int result = servicePending(cache);
+    if (result > 0) {
+      lastManualMs = current;
+      sendSafety(boat::Type::Arm);
+      setStage(Stage::WaitArmed, "ARMの成立を待っています。");
+    } else if (result < 0) {
+      failOperation(operationMessage);
+    }
+    return;
+  }
 
-    case Stage::WaitRunning:
-      if (usesManualRefresh()) keepManualFresh();
-      if (safety == 3) {
-        setStage(Stage::Running, usesWaypoint()
-            ? "固定ウェイポイントへの自動航行を実行しています。"
-            : (operation.attitudeEnabled
-                ? "姿勢補助付き手動運転を実行しています。"
-                : "全サーボと推進を手動出力しています。"));
-      } else if (safety == 4 || safety == 5) {
-        failSafetyOperation(cache, "START");
-      } else if (current - stageStartedMs > kSafetyTimeoutMs) {
-        failOperation("STARTできませんでした。XIAOの状態を確認してください。");
-      } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
-        sendSafety(boat::Type::StartTest);
-      }
-      return;
+  case Stage::WaitArmed:
+    if (usesManualRefresh())
+      keepManualFresh();
+    if (safety == 2) {
+      sendSafety(boat::Type::StartTest);
+      setStage(Stage::WaitRunning, "STARTの成立を待っています。");
+    } else if (safety == 4) {
+      failOperation("ARM中に緊急停止になりました。");
+    } else if (current - stageStartedMs > kSafetyTimeoutMs) {
+      failOperation("ARMできませんでした。PCA9685と配線を確認してください。");
+    } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
+      sendSafety(boat::Type::Arm);
+    }
+    return;
 
-    case Stage::Running:
-      if (usesManualRefresh()) keepManualFresh();
-      if (usesWaypoint() && safety == 1 && cache.sawFinalWaypoint) {
-        sendManualOff();
-        setStage(Stage::Idle, "選択した固定ウェイポイントへ到着し、全出力を停止しました。");
-      } else if (safety != 3) {
-        failSafetyOperation(cache, "RUNNING");
-      }
-      return;
+  case Stage::WaitRunning:
+    if (usesManualRefresh())
+      keepManualFresh();
+    if (safety == 3) {
+      setStage(Stage::Running,
+               usesWaypoint()
+                   ? "固定ウェイポイントへの自動航行を実行しています。"
+                   : (operation.attitudeEnabled ? "姿勢補助付き手動運転を実行しています。"
+                                                : "全サーボと推進を手動出力しています。"));
+    } else if (safety == 4 || safety == 5) {
+      failSafetyOperation(cache, "START");
+    } else if (current - stageStartedMs > kSafetyTimeoutMs) {
+      failOperation("STARTできませんでした。XIAOの状態を確認してください。");
+    } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
+      sendSafety(boat::Type::StartTest);
+    }
+    return;
 
-    case Stage::Stopping:
-      if (safety == 1) {
-        sendManualOff();
-        setStage(Stage::Idle, "停止しました。すべての出力はOFFです。");
-      } else if (safety == 4) {
-        setStage(Stage::Emergency, "緊急停止中です。すべての出力はOFFです。");
-      } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
-        sendSafety(boat::Type::Stop);
-      }
-      return;
+  case Stage::Running:
+    if (usesManualRefresh())
+      keepManualFresh();
+    if (usesWaypoint() && safety == 1 && cache.sawFinalWaypoint) {
+      sendManualOff();
+      setStage(Stage::Idle, "選択した固定ウェイポイントへ到着し、全出力を停止しました。");
+    } else if (safety != 3) {
+      failSafetyOperation(cache, "RUNNING");
+    }
+    return;
 
-    case Stage::Emergency:
-      if (safety != 4 && current - stageStartedMs > kSafetyTimeoutMs) {
-        setMessage("緊急停止状態を確認できません。物理的に電源を切ってください。");
-      } else if (safety != 4 && (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs)) {
-        sendSafety(boat::Type::Estop);
-      }
-      return;
+  case Stage::Stopping:
+    if (safety == 1) {
+      sendManualOff();
+      setStage(Stage::Idle, "停止しました。すべての出力はOFFです。");
+    } else if (safety == 4) {
+      setStage(Stage::Emergency, "緊急停止中です。すべての出力はOFFです。");
+    } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
+      sendSafety(boat::Type::Stop);
+    }
+    return;
 
-    case Stage::ClearingEmergency:
-      if (safety == 1) {
-        setStage(Stage::Idle, "緊急停止を解除しました。出力はOFFです。");
-      } else if (current - stageStartedMs > kSafetyTimeoutMs) {
-        failOperation("緊急停止を解除できませんでした。");
-      } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
-        sendSafety(boat::Type::ClearEstop);
-      }
-      return;
+  case Stage::Emergency:
+    if (safety != 4 && current - stageStartedMs > kSafetyTimeoutMs) {
+      setMessage("緊急停止状態を確認できません。物理的に電源を切ってください。");
+    } else if (safety != 4 && (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs)) {
+      sendSafety(boat::Type::Estop);
+    }
+    return;
+
+  case Stage::ClearingEmergency:
+    if (safety == 1) {
+      setStage(Stage::Idle, "緊急停止を解除しました。出力はOFFです。");
+    } else if (current - stageStartedMs > kSafetyTimeoutMs) {
+      failOperation("緊急停止を解除できませんでした。");
+    } else if (!lastSafetyMs || current - lastSafetyMs >= kSafetyRetryMs) {
+      sendSafety(boat::Type::ClearEstop);
+    }
+    return;
   }
 }
 
-void processFrame(const boat::Frame& frame) {
+void processFrame(const boat::Frame &frame) {
   const boat::Type type = static_cast<boat::Type>(frame.header.type);
   const uint64_t receivedUs = nowUs();
   portENTER_CRITICAL(&cacheMux);
   linkCache.lastFrameUs = receivedUs;
   ++linkCache.frames;
-  if (type == boat::Type::ControlSnapshot &&
-      frame.header.length == sizeof(linkCache.snapshot)) {
+  if (type == boat::Type::ControlSnapshot && frame.header.length == sizeof(linkCache.snapshot)) {
     memcpy(&linkCache.snapshot, frame.payload, sizeof(linkCache.snapshot));
     linkCache.lastSnapshotUs = receivedUs;
     linkCache.hasSnapshot = true;
     if (linkCache.snapshot.safetyReason)
       linkCache.latchedStopReason = linkCache.snapshot.safetyReason;
-  } else if (type == boat::Type::ControlOutput &&
-             frame.header.length == sizeof(linkCache.output)) {
+  } else if (type == boat::Type::ControlOutput && frame.header.length == sizeof(linkCache.output)) {
     memcpy(&linkCache.output, frame.payload, sizeof(linkCache.output));
     linkCache.lastOutputUs = receivedUs;
     linkCache.hasOutput = true;
     if (linkCache.output.stopReason)
       linkCache.latchedStopReason = linkCache.output.stopReason;
-    if (linkCache.output.stopReason == 13) linkCache.sawFinalWaypoint = true;
+    if (linkCache.output.stopReason == 13)
+      linkCache.sawFinalWaypoint = true;
   } else if (type == boat::Type::ActuatorState &&
              frame.header.length == sizeof(linkCache.actuators)) {
     memcpy(&linkCache.actuators, frame.payload, sizeof(linkCache.actuators));
     linkCache.lastActuatorUs = receivedUs;
     linkCache.hasActuators = true;
-  } else if (type == boat::Type::SystemHealth &&
-             frame.header.length == sizeof(linkCache.health)) {
+  } else if (type == boat::Type::SystemHealth && frame.header.length == sizeof(linkCache.health)) {
     memcpy(&linkCache.health, frame.payload, sizeof(linkCache.health));
     linkCache.hasHealth = true;
     if (linkCache.health.stopReason)
@@ -718,7 +812,7 @@ void processFrame(const boat::Frame& frame) {
   portEXIT_CRITICAL(&cacheMux);
 }
 
-void controlRxTask(void*) {
+void controlRxTask(void *) {
   uint8_t bytes[kRxChunkBytes];
   for (;;) {
     const int available = controlUart.available();
@@ -730,7 +824,8 @@ void controlRxTask(void*) {
     const size_t count = controlUart.read(bytes, wanted);
     for (size_t index = 0; index < count; ++index) {
       boat::Frame frame{};
-      if (controlDecoder.feed(bytes[index], frame)) processFrame(frame);
+      if (controlDecoder.feed(bytes[index], frame))
+        processFrame(frame);
     }
     crcErrors = controlDecoder.crcErrors;
     cobsErrors = controlDecoder.cobsErrors;
@@ -740,61 +835,75 @@ void controlRxTask(void*) {
 
 void sendHeartbeat() {
   const uint32_t current = millis();
-  if (current - lastHeartbeatMs < kHeartbeatPeriodMs) return;
+  if (current - lastHeartbeatMs < kHeartbeatPeriodMs)
+    return;
   const LinkCache cache = cacheSnapshot();
   // A heartbeat is proof of a healthy bidirectional link. If the communication
   // XIAO can no
   // longer receive XIAO telemetry, stop heartbeats so XIAO's own link timeout
   // also forces every physical output off.
-  if (!linkConnected(cache)) return;
+  if (!linkConnected(cache))
+    return;
   lastHeartbeatMs = current;
   boat::HeartbeatPayload heartbeat{current, frameSequence, currentSafety(cache), 0, 0};
   sendFrame(boat::Type::Heartbeat, &heartbeat, sizeof(heartbeat));
 }
 
-bool parseFloatArgument(const char* name, float& value) {
+bool parseFloatArgument(const char *name, float &value) {
   const String source = web.arg(name);
-  if (!source.length()) return false;
-  char* end = nullptr;
+  if (!source.length())
+    return false;
+  char *end = nullptr;
   value = strtof(source.c_str(), &end);
   return end && *end == 0 && isfinite(value);
 }
 
-bool parseManualValues(ManualValues& values) {
-  if (!parseFloatArgument("left", values.left) ||
-      !parseFloatArgument("right", values.right) ||
+bool parseManualValues(ManualValues &values) {
+  if (!parseFloatArgument("left", values.left) || !parseFloatArgument("right", values.right) ||
       !parseFloatArgument("rear", values.rear) ||
       !parseFloatArgument("propulsion", values.propulsion)) {
     return false;
   }
-  return values.left >= -1.0f && values.left <= 1.0f &&
-         values.right >= -1.0f && values.right <= 1.0f &&
-         values.rear >= -1.0f && values.rear <= 1.0f &&
+  return values.left >= -1.0f && values.left <= 1.0f && values.right >= -1.0f &&
+         values.right <= 1.0f && values.rear >= -1.0f && values.rear <= 1.0f &&
          values.propulsion >= 0.0f && values.propulsion <= 1.0f;
 }
 
-bool parseBooleanArgument(const char* name,bool& value) {
-  const String source=web.arg(name);
-  if(source=="1"||source=="true"){value=true;return true;}
-  if(source=="0"||source=="false"){value=false;return true;}
+bool parseBooleanArgument(const char *name, bool &value) {
+  const String source = web.arg(name);
+  if (source == "1" || source == "true") {
+    value = true;
+    return true;
+  }
+  if (source == "0" || source == "false") {
+    value = false;
+    return true;
+  }
   return false;
 }
 
-bool parseOperationConfig(OperationConfig& config) {
-  if(!parseBooleanArgument("waypoint",config.waypointEnabled)||
-     !parseBooleanArgument("attitude",config.attitudeEnabled))return false;
-  const String target=web.arg("target");
-  char* end=nullptr;const long index=strtol(target.c_str(),&end,10);
-  if(!target.length()||!end||*end||index<0||index>=static_cast<long>(fixed_waypoints::kCount))return false;
-  config.targetIndex=static_cast<uint8_t>(index);
-  config.mode=selectedMode(config.waypointEnabled,config.attitudeEnabled);
+bool parseOperationConfig(OperationConfig &config) {
+  if (!parseBooleanArgument("waypoint", config.waypointEnabled) ||
+      !parseBooleanArgument("attitude", config.attitudeEnabled))
+    return false;
+  const String target = web.arg("target");
+  char *end = nullptr;
+  const long index = strtol(target.c_str(), &end, 10);
+  if (!target.length() || !end || *end || index < 0 ||
+      index >= static_cast<long>(fixed_waypoints::kCount))
+    return false;
+  config.targetIndex = static_cast<uint8_t>(index);
+  config.mode = selectedMode(config.waypointEnabled, config.attitudeEnabled);
   return true;
 }
 
-void sendJsonResult(int code, bool accepted, const char* message) {
+void sendJsonResult(int code, bool accepted, const char *message) {
   char body[180];
-  snprintf(body, sizeof(body), "{\"accepted\":%s,\"message\":\"%s\"}",
-           accepted ? "true" : "false", message);
+  snprintf(body,
+           sizeof(body),
+           "{\"accepted\":%s,\"message\":\"%s\"}",
+           accepted ? "true" : "false",
+           message);
   web.send(code, "application/json; charset=utf-8", body);
 }
 
@@ -805,8 +914,8 @@ void apiStart() {
     sendJsonResult(400, false, "手動出力値が不正です。");
     return;
   }
-  if(!parseOperationConfig(requested)){
-    sendJsonResult(400,false,"制御設定または固定ウェイポイント選択が不正です。");
+  if (!parseOperationConfig(requested)) {
+    sendJsonResult(400, false, "制御設定または固定ウェイポイント選択が不正です。");
     return;
   }
   const LinkCache cache = cacheSnapshot();
@@ -822,13 +931,15 @@ void apiStart() {
     sendJsonResult(409, false, "緊急停止を解除してください。");
     return;
   }
-  if((requested.attitudeEnabled||requested.waypointEnabled)&&
-     (!cache.hasSnapshot||ageMs(cache.lastSnapshotUs,nowUs())>kLinkFreshMs||!cache.snapshot.imuValid)){
-    sendJsonResult(409,false,"姿勢または航法制御に必要なBNO08Xが有効ではありません。");
+  if ((requested.attitudeEnabled || requested.waypointEnabled) &&
+      (!cache.hasSnapshot || ageMs(cache.lastSnapshotUs, nowUs()) > kLinkFreshMs ||
+       !cache.snapshot.imuValid)) {
+    sendJsonResult(409, false, "姿勢または航法制御に必要なBNO08Xが有効ではありません。");
     return;
   }
-  if(requested.waypointEnabled&&(!gnssFixFresh()||!cache.hasSnapshot||!cache.snapshot.gnssValid)){
-    sendJsonResult(409,false,"通信側と制御側の両方で有効なGNSS測位を確認できません。");
+  if (requested.waypointEnabled &&
+      (!gnssFixFresh() || !cache.hasSnapshot || !cache.snapshot.gnssValid)) {
+    sendJsonResult(409, false, "通信側と制御側の両方で有効なGNSS測位を確認できません。");
     return;
   }
   if (stage != Stage::Idle && stage != Stage::Error) {
@@ -840,11 +951,11 @@ void apiStart() {
   pending.active = false;
   lastManualMs = 0;
   portENTER_CRITICAL(&cacheMux);
-  linkCache.sawFinalWaypoint=false;
-  linkCache.latchedStopReason=0;
-  linkCache.output.stopReason=0;
-  linkCache.health.stopReason=0;
-  linkCache.snapshot.safetyReason=0;
+  linkCache.sawFinalWaypoint = false;
+  linkCache.latchedStopReason = 0;
+  linkCache.output.stopReason = 0;
+  linkCache.health.stopReason = 0;
+  linkCache.snapshot.safetyReason = 0;
   portEXIT_CRITICAL(&cacheMux);
   setStage(Stage::EnsureDisarmed, "XIAOを停止状態にそろえています。");
   sendJsonResult(202, true, "開始手順を通信側XIAOで実行します。");
@@ -860,8 +971,8 @@ void apiValue() {
     sendJsonResult(409, false, "動作中ではありません。");
     return;
   }
-  if(usesWaypoint()){
-    sendJsonResult(409,false,"ウェイポイント航行中は手動出力値を変更できません。");
+  if (usesWaypoint()) {
+    sendJsonResult(409, false, "ウェイポイント航行中は手動出力値を変更できません。");
     return;
   }
   manualValues = values;
@@ -901,72 +1012,88 @@ void apiStatus() {
   const bool connected = linkConnected(cache);
   const uint32_t linkAge = ageMs(cache.lastFrameUs, nowUs());
   const uint8_t safety = currentSafety(cache);
-  const auto& fix=gnssRx.latest();
-  const fixed_waypoints::Point* target=fixed_waypoints::byIndex(operation.targetIndex);
+  const auto &fix = gnssRx.latest();
+  const fixed_waypoints::Point *target = fixed_waypoints::byIndex(operation.targetIndex);
   char body[2300];
-  snprintf(
-      body, sizeof(body),
-      "{\"connected\":%s,\"ever_received\":%s,\"age_ms\":%lu,"
-      "\"operation\":\"%s\",\"message\":\"%s\","
-      "\"selection\":{\"waypoint\":%s,\"attitude\":%s,\"target_index\":%u,"
-      "\"target_name\":\"%c\",\"mode\":%u,\"mode_name\":\"%s\"},"
-      "\"manual\":{\"enabled_mask\":%u,\"left\":%.3f,\"right\":%.3f,"
-      "\"rear\":%.3f,\"propulsion\":%.3f},"
-      "\"gnss\":{\"communication_valid\":%s,\"control_valid\":%u,\"age_ms\":%lu,"
-      "\"latitude\":%.8f,\"longitude\":%.8f,\"speed_mps\":%.3f,"
-      "\"satellites\":%u,\"sentences\":%lu,\"checksum_errors\":%lu},"
-      "\"storage\":{\"sd_ready\":%s,\"logging_enabled\":false},"
-      "\"control\":{\"safety\":%u,\"safety_name\":\"%s\","
-      "\"mode\":%u,\"stop_reason\":%u,\"stop_reason_name\":\"%s\","
-      "\"waypoint_distance_m\":%.2f,\"active_waypoint\":%u,"
-      "\"target_latitude\":%.8f,\"target_longitude\":%.8f},"
-      "\"actuators\":{\"pca_ready\":%u,\"pwm_errors\":%lu,"
-      "\"outputs_enabled\":%u,\"enabled_mask\":%u,\"left_us\":%u,"
-      "\"right_us\":%u,\"rear_us\":%u,\"relay\":%u,"
-      "\"target_duty\":%.3f,\"applied_duty\":%.3f},"
-      "\"sensors\":{\"imu_valid\":%u,\"roll_rad\":%.4f,\"pitch_rad\":%.4f,"
-      "\"yaw_rad\":%.4f,\"tof_valid\":%u,\"tof_m\":%.3f},"
-      "\"link\":{\"frames\":%lu,\"crc_errors\":%lu,\"cobs_errors\":%lu,"
-      "\"length_errors\":%lu}}",
-      connected ? "true" : "false", cache.lastFrameUs ? "true" : "false",
-      static_cast<unsigned long>(linkAge), stageName(stage), operationMessage,
-      operation.waypointEnabled?"true":"false",operation.attitudeEnabled?"true":"false",
-      static_cast<unsigned>(operation.targetIndex),target?target->name:'?',
-      static_cast<unsigned>(operation.mode),modeName(operation.mode),
-      static_cast<unsigned>(kAllManualMask), manualValues.left, manualValues.right,
-      manualValues.rear, manualValues.propulsion,
-      gnssFixFresh()?"true":"false",
-      static_cast<unsigned>(cache.hasSnapshot?cache.snapshot.gnssValid:0),
-      static_cast<unsigned long>(ageMs(fix.lastValidFixUs,nowUs())),
-      fix.latitude,fix.longitude,fix.speedMps,static_cast<unsigned>(fix.satellites),
-      static_cast<unsigned long>(gnssSentences),static_cast<unsigned long>(gnssChecksumErrors),
-      sdReady ? "true" : "false",
-      static_cast<unsigned>(safety), safetyName(safety),
-      static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.mode : 0),
-      static_cast<unsigned>(currentStopReason(cache)),
-      stopReasonName(currentStopReason(cache)),
-      cache.hasSnapshot?cache.snapshot.waypointDistanceM:0.0f,
-      static_cast<unsigned>(cache.hasSnapshot?cache.snapshot.activeWaypoint:0),
-      cache.hasSnapshot?cache.snapshot.targetWaypointLatitudeDeg:0.0,
-      cache.hasSnapshot?cache.snapshot.targetWaypointLongitudeDeg:0.0,
-      static_cast<unsigned>(cache.hasActuators ? cache.actuators.pcaReady : 0),
-      static_cast<unsigned long>(cache.hasActuators ? cache.actuators.pwmErrors : 0),
-      static_cast<unsigned>(cache.hasActuators ? cache.actuators.outputsEnabled : 0),
-      static_cast<unsigned>(cache.hasActuators ? cache.actuators.enabledMask : 0),
-      static_cast<unsigned>(cache.hasActuators ? cache.actuators.leftPulseUs : 0),
-      static_cast<unsigned>(cache.hasActuators ? cache.actuators.rightPulseUs : 0),
-      static_cast<unsigned>(cache.hasActuators ? cache.actuators.rearPulseUs : 0),
-      static_cast<unsigned>(cache.hasActuators ? cache.actuators.motorRelayEnabled : 0),
-      cache.hasActuators ? cache.actuators.targetDuty : 0.0f,
-      cache.hasActuators ? cache.actuators.appliedDuty : 0.0f,
-      static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.imuValid : 0),
-      cache.hasSnapshot ? cache.snapshot.rollRad : 0.0f,
-      cache.hasSnapshot ? cache.snapshot.pitchRad : 0.0f,
-      cache.hasSnapshot ? cache.snapshot.yawRad : 0.0f,
-      static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.tofValid : 0),
-      cache.hasSnapshot ? cache.snapshot.tofFilteredM : 0.0f,
-      static_cast<unsigned long>(cache.frames), static_cast<unsigned long>(crcErrors),
-      static_cast<unsigned long>(cobsErrors), static_cast<unsigned long>(lengthErrors));
+  snprintf(body,
+           sizeof(body),
+           "{\"connected\":%s,\"ever_received\":%s,\"age_ms\":%lu,"
+           "\"operation\":\"%s\",\"message\":\"%s\","
+           "\"selection\":{\"waypoint\":%s,\"attitude\":%s,\"target_index\":%u,"
+           "\"target_name\":\"%c\",\"mode\":%u,\"mode_name\":\"%s\"},"
+           "\"manual\":{\"enabled_mask\":%u,\"left\":%.3f,\"right\":%.3f,"
+           "\"rear\":%.3f,\"propulsion\":%.3f},"
+           "\"gnss\":{\"communication_valid\":%s,\"control_valid\":%u,\"age_ms\":%lu,"
+           "\"latitude\":%.8f,\"longitude\":%.8f,\"speed_mps\":%.3f,"
+           "\"satellites\":%u,\"sentences\":%lu,\"checksum_errors\":%lu},"
+           "\"storage\":{\"sd_ready\":%s,\"logging_enabled\":false},"
+           "\"control\":{\"safety\":%u,\"safety_name\":\"%s\","
+           "\"mode\":%u,\"stop_reason\":%u,\"stop_reason_name\":\"%s\","
+           "\"waypoint_distance_m\":%.2f,\"active_waypoint\":%u,"
+           "\"target_latitude\":%.8f,\"target_longitude\":%.8f},"
+           "\"actuators\":{\"pca_ready\":%u,\"pwm_errors\":%lu,"
+           "\"outputs_enabled\":%u,\"enabled_mask\":%u,\"left_us\":%u,"
+           "\"right_us\":%u,\"rear_us\":%u,\"relay\":%u,"
+           "\"target_duty\":%.3f,\"applied_duty\":%.3f},"
+           "\"sensors\":{\"imu_valid\":%u,\"roll_rad\":%.4f,\"pitch_rad\":%.4f,"
+           "\"yaw_rad\":%.4f,\"tof_valid\":%u,\"tof_m\":%.3f},"
+           "\"link\":{\"frames\":%lu,\"crc_errors\":%lu,\"cobs_errors\":%lu,"
+           "\"length_errors\":%lu}}",
+           connected ? "true" : "false",
+           cache.lastFrameUs ? "true" : "false",
+           static_cast<unsigned long>(linkAge),
+           stageName(stage),
+           operationMessage,
+           operation.waypointEnabled ? "true" : "false",
+           operation.attitudeEnabled ? "true" : "false",
+           static_cast<unsigned>(operation.targetIndex),
+           target ? target->name : '?',
+           static_cast<unsigned>(operation.mode),
+           modeName(operation.mode),
+           static_cast<unsigned>(kAllManualMask),
+           manualValues.left,
+           manualValues.right,
+           manualValues.rear,
+           manualValues.propulsion,
+           gnssFixFresh() ? "true" : "false",
+           static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.gnssValid : 0),
+           static_cast<unsigned long>(ageMs(fix.lastValidFixUs, nowUs())),
+           fix.latitude,
+           fix.longitude,
+           fix.speedMps,
+           static_cast<unsigned>(fix.satellites),
+           static_cast<unsigned long>(gnssSentences),
+           static_cast<unsigned long>(gnssChecksumErrors),
+           sdReady ? "true" : "false",
+           static_cast<unsigned>(safety),
+           safetyName(safety),
+           static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.mode : 0),
+           static_cast<unsigned>(currentStopReason(cache)),
+           stopReasonName(currentStopReason(cache)),
+           cache.hasSnapshot ? cache.snapshot.waypointDistanceM : 0.0f,
+           static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.activeWaypoint : 0),
+           cache.hasSnapshot ? cache.snapshot.targetWaypointLatitudeDeg : 0.0,
+           cache.hasSnapshot ? cache.snapshot.targetWaypointLongitudeDeg : 0.0,
+           static_cast<unsigned>(cache.hasActuators ? cache.actuators.pcaReady : 0),
+           static_cast<unsigned long>(cache.hasActuators ? cache.actuators.pwmErrors : 0),
+           static_cast<unsigned>(cache.hasActuators ? cache.actuators.outputsEnabled : 0),
+           static_cast<unsigned>(cache.hasActuators ? cache.actuators.enabledMask : 0),
+           static_cast<unsigned>(cache.hasActuators ? cache.actuators.leftPulseUs : 0),
+           static_cast<unsigned>(cache.hasActuators ? cache.actuators.rightPulseUs : 0),
+           static_cast<unsigned>(cache.hasActuators ? cache.actuators.rearPulseUs : 0),
+           static_cast<unsigned>(cache.hasActuators ? cache.actuators.motorRelayEnabled : 0),
+           cache.hasActuators ? cache.actuators.targetDuty : 0.0f,
+           cache.hasActuators ? cache.actuators.appliedDuty : 0.0f,
+           static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.imuValid : 0),
+           cache.hasSnapshot ? cache.snapshot.rollRad : 0.0f,
+           cache.hasSnapshot ? cache.snapshot.pitchRad : 0.0f,
+           cache.hasSnapshot ? cache.snapshot.yawRad : 0.0f,
+           static_cast<unsigned>(cache.hasSnapshot ? cache.snapshot.tofValid : 0),
+           cache.hasSnapshot ? cache.snapshot.tofFilteredM : 0.0f,
+           static_cast<unsigned long>(cache.frames),
+           static_cast<unsigned long>(crcErrors),
+           static_cast<unsigned long>(cobsErrors),
+           static_cast<unsigned long>(lengthErrors));
   web.send(200, "application/json; charset=utf-8", body);
 }
 
@@ -974,14 +1101,18 @@ void startWeb() {
   WiFi.mode(WIFI_AP);
   WiFi.setSleep(false);
   WiFi.softAP(kApSsid, kApPassword);
-  web.on("/", HTTP_GET, [] { web.send(200, "text/html; charset=utf-8", productionPageJapanese); });
+  web.on("/", HTTP_GET, [] {
+    web.send(200, "text/html; charset=utf-8", productionPageJapanese);
+  });
   web.on("/api/status", HTTP_GET, apiStatus);
   web.on("/api/start", HTTP_POST, apiStart);
   web.on("/api/value", HTTP_POST, apiValue);
   web.on("/api/stop", HTTP_POST, apiStop);
   web.on("/api/estop", HTTP_POST, apiEstop);
   web.on("/api/clear-estop", HTTP_POST, apiClearEstop);
-  web.onNotFound([] { web.send(404, "application/json", "{\"error\":\"not_found\"}"); });
+  web.onNotFound([] {
+    web.send(404, "application/json", "{\"error\":\"not_found\"}");
+  });
   web.begin();
 }
 
@@ -989,27 +1120,34 @@ void printStatus() {
   const LinkCache cache = cacheSnapshot();
   const bool connected = linkConnected(cache);
   const uint8_t safety = currentSafety(cache);
-  const auto& fix=gnssRx.latest();
-  const fixed_waypoints::Point* target=fixed_waypoints::byIndex(operation.targetIndex);
-  Serial.printf(
-      "LINK=%s age=%lu frames=%lu CONTROL=%s COMM=%s MODE=%s WP=%c "
-      "GNSS=%s sat=%u SD=%s REASON=%s AP=http://%s/ UART_ERR=%lu/%lu/%lu\n",
-      connected ? "OK" : "WAIT",
-      static_cast<unsigned long>(ageMs(cache.lastFrameUs, nowUs())),
-      static_cast<unsigned long>(cache.frames), safetyName(safety), stageName(stage),
-      modeName(operation.mode), target ? target->name : '?',
-      gnssFixFresh() ? "FIX" : "WAIT", fix.satellites, sdReady ? "OK" : "WAIT",
-      stopReasonName(currentStopReason(cache)), WiFi.softAPIP().toString().c_str(),
-      static_cast<unsigned long>(crcErrors), static_cast<unsigned long>(cobsErrors),
-      static_cast<unsigned long>(lengthErrors));
+  const auto &fix = gnssRx.latest();
+  const fixed_waypoints::Point *target = fixed_waypoints::byIndex(operation.targetIndex);
+  Serial.printf("LINK=%s age=%lu frames=%lu CONTROL=%s COMM=%s MODE=%s WP=%c "
+                "GNSS=%s sat=%u SD=%s REASON=%s AP=http://%s/ UART_ERR=%lu/%lu/%lu\n",
+                connected ? "OK" : "WAIT",
+                static_cast<unsigned long>(ageMs(cache.lastFrameUs, nowUs())),
+                static_cast<unsigned long>(cache.frames),
+                safetyName(safety),
+                stageName(stage),
+                modeName(operation.mode),
+                target ? target->name : '?',
+                gnssFixFresh() ? "FIX" : "WAIT",
+                fix.satellites,
+                sdReady ? "OK" : "WAIT",
+                stopReasonName(currentStopReason(cache)),
+                WiFi.softAPIP().toString().c_str(),
+                static_cast<unsigned long>(crcErrors),
+                static_cast<unsigned long>(cobsErrors),
+                static_cast<unsigned long>(lengthErrors));
 }
 
-}  // namespace
+} // namespace
 
 void setup() {
   Serial.begin(115200);
   bootId = esp_random();
-  if (!bootId) bootId = 1;
+  if (!bootId)
+    bootId = 1;
   frameSequence = esp_random();
   safetyCommandId = esp_random();
   initializePersistentCounters();
@@ -1028,10 +1166,19 @@ void setup() {
 
   Serial.printf("%s %s GNSS_RX=%d GNSS_TX=%d CONTROL_RX=%d CONTROL_TX=%d "
                 "SD_SCK=%d SD_MISO=%d SD_MOSI=%d SD_CS=%d SD=%s baud=%lu AP=%s URL=http://%s/\n",
-                kFirmwareName, kFirmwareVersion, kGnssRxPin,kGnssTxPin,
-                kControlUartRxPin, kControlUartTxPin, kSdSckPin, kSdMisoPin,
-                kSdMosiPin, kSdCsPin, sdReady ? "OK" : "NOT_READY",
-                static_cast<unsigned long>(kControlUartBaud), kApSsid,
+                kFirmwareName,
+                kFirmwareVersion,
+                kGnssRxPin,
+                kGnssTxPin,
+                kControlUartRxPin,
+                kControlUartTxPin,
+                kSdSckPin,
+                kSdMisoPin,
+                kSdMosiPin,
+                kSdCsPin,
+                sdReady ? "OK" : "NOT_READY",
+                static_cast<unsigned long>(kControlUartBaud),
+                kApSsid,
                 WiFi.softAPIP().toString().c_str());
 }
 

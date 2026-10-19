@@ -30,8 +30,8 @@ constexpr uint8_t kCompetitionRouteIndices[] = {0, 1, 2, 3, 4, 5, 6, 7, 2, 1, 0}
 constexpr size_t kCompetitionRouteCount =
     sizeof(kCompetitionRouteIndices) / sizeof(kCompetitionRouteIndices[0]);
 
-inline const Point* byIndex(uint8_t index) {
+inline const Point *byIndex(uint8_t index) {
   return index < kCount ? &kPoints[index] : nullptr;
 }
 
-}  // namespace fixed_waypoints
+} // namespace fixed_waypoints

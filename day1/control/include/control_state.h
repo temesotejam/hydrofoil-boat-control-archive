@@ -10,21 +10,28 @@ namespace control_state {
 // controller. Attitude comes directly from the BNO08X Rotation Vector; this
 // class does not integrate gyro data and does not run an attitude filter.
 class State {
- public:
-  void ingestRotation(uint64_t sensorUs, uint64_t receivedUs, uint8_t accuracy,
-                      float qx, float qy, float qz, float qw);
-  void ingestGyro(uint64_t sensorUs, uint64_t receivedUs,
-                  float x, float y, float z);
+public:
+  void ingestRotation(uint64_t sensorUs,
+                      uint64_t receivedUs,
+                      uint8_t accuracy,
+                      float qx,
+                      float qy,
+                      float qz,
+                      float qw);
+  void ingestGyro(uint64_t sensorUs, uint64_t receivedUs, float x, float y, float z);
   void noteAccel(uint64_t receivedUs);
   void noteMagnetic(uint64_t receivedUs);
-  void updateGnss(uint64_t receivedUs, double latitudeDeg,
-                  double longitudeDeg, float speedMps, float courseRad,
+  void updateGnss(uint64_t receivedUs,
+                  double latitudeDeg,
+                  double longitudeDeg,
+                  float speedMps,
+                  float courseRad,
                   bool valid);
   void updateWaterDistance(uint64_t receivedUs, float distanceM, bool valid);
 
   boat::EstimatedStatePayload snapshot(uint64_t nowUs) const;
 
- private:
+private:
   mutable portMUX_TYPE mux_ = portMUX_INITIALIZER_UNLOCKED;
 
   float qw_ = 1.0f, qx_ = 0.0f, qy_ = 0.0f, qz_ = 0.0f;
@@ -46,4 +53,4 @@ class State {
   bool gnssValid_ = false, waterValid_ = false;
 };
 
-}  // namespace control_state
+} // namespace control_state
