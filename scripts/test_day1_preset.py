@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory() as tmp:
     exe=str(Path(tmp)/('day1-course.exe' if os.name=='nt' else 'day1-course'))
     subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror',
-        '-ffunction-sections','-fdata-sections','-Wl,--gc-sections','-DARDUINO',
+        '-ffunction-sections','-fdata-sections','-Wl,--gc-sections','-DARDUINO','-include','cstring',
         '-Iscripts/tests/stubs','-Iday1/tests/stubs','-Iday1/communication/include',
         '-Iday1/communication/lib/boat_protocol/src','-Iday1/control/lib/production_control/src',
         'scripts/tests/day1_course_test.cpp','day1/communication/src/gnss_receiver.cpp',
