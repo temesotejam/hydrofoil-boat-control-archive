@@ -5,7 +5,7 @@
       "label": "1日目",
       "date": "8月8日",
       "commit": "88bed77ee1779f9e76afa91d313e38ace85177a6",
-      "variant": "used-day1-v1",
+      "variant": "used-day1-duty100-v1",
       "source_snapshot_path": "reconstruction/day1",
       "upstream_base_commit": "0820d1d1c2107609c839bf6cc5d8c42f9d56e982",
       "designation": "使用者が1日目の使用版として指定",
@@ -21,7 +21,7 @@
         "communication/platformio.ini": "e83634214fb3c1efcad62762b3580762abbc5523d5db0e0bfb43e3057481032e",
         "communication/src/gnss_receiver.cpp": "2ec12ff1e977c15a1c5f1267daeb8ed67d97493f4189878e103c94aa6745a84f",
         "communication/src/main.cpp": "44dd0ccfde345712231fedbf7b976075843f667fb95a0b303d35a84a9f6a416a",
-        "control/include/app_config.h": "22bbd7fe812dbb085f508240029b905e3dc1a1c12c3fb33d4c2891d995939802",
+        "control/include/app_config.h": "093fc84c1bbdd7ac65d1e5bcf3b681e8996dc9c631f961709ac192df93fd9c17",
         "control/include/bno_reader.h": "6f53c6a876cbf51b74770eca0ffb6c5b215f539f12071f5ec2511f5091a407d4",
         "control/include/control_state.h": "49af045b0deceacf45cba29d521db5e10698f449a8624e15293f54e19a65bc38",
         "control/include/data_types.h": "e7d15006f276d7cd66ec76272e6f4f5e46b0687b62efad0ef68dd48ae6becae9",
@@ -39,7 +39,7 @@
         "control/lib/production_control/src/competition_actuators.cpp": "970b2d55314d10dfb08b57bc21a401d6c3a8e154e7d40487d9304f59eec3d982",
         "control/lib/production_control/src/competition_actuators.h": "f2ee8afa44bebd90c4adb2d216b2be54bb04d125f14ba9b5c2b6743832da5f10",
         "control/lib/production_control/src/production_control.cpp": "21b92d3029414d390dee17e0d9a10bd6fcbe202bfc71a448c64532e383d4428b",
-        "control/lib/production_control/src/production_control.h": "d7677d43662a83ac0d80b7c09511b972b7e91243a2d97bc56a399b467fa9273f",
+        "control/lib/production_control/src/production_control.h": "57fde270aa44cf1f1e85f02de4ef8bf76334b565ec9424435639d9d42e5453df",
         "control/platformio.ini": "7f0ca42692be1baa8c53099249ab3fd3d29232a6df1fdf7f2fb58e2fb0173f68",
         "control/src/bno_reader.cpp": "157666c85640b4599434998d85279d1d86a4e10a4f817b04001c2d96dcfb8b71",
         "control/src/control_state.cpp": "a8d507942705325882a11effa5c2fa7718642f7897ab84e3d9f1aff5fe45a4b8",
@@ -58,6 +58,15 @@
         "verification/controller_test.cpp": "ca9c8953b9ba56fee077b1a11dcd84b638e2cea1b0c355df9092147b738a01ee",
         "verification/run.py": "9888532f660763b5d8b53b418a9607e9495439cf64c46bf2f7f042e3100ddedd",
         "verification/ui_test.js": "481aae3deffb02bcf2543d941781b990a57349ad3a6f4b9e2709d5e819aa539c"
+      },
+      "usage_correction": {
+        "id": "auto-duty-100-v1",
+        "files": [
+          "control/include/app_config.h",
+          "control/lib/production_control/src/production_control.h"
+        ],
+        "automatic_request": 1.0,
+        "basis": "使用者が両日とも自動航行でDuty 100%になる設定を使用したと確認"
       }
     },
     "day2": {
@@ -77,7 +86,7 @@
         "communication/platformio.ini": "e83634214fb3c1efcad62762b3580762abbc5523d5db0e0bfb43e3057481032e",
         "communication/src/gnss_receiver.cpp": "2ec12ff1e977c15a1c5f1267daeb8ed67d97493f4189878e103c94aa6745a84f",
         "communication/src/main.cpp": "e29b19af5f9e7fa0cf5ccb2a0db16e920fa299b8a3bf1a8cd9dd3291e1f6be58",
-        "control/include/app_config.h": "c7a911ef6323769b47c34f9b1f305419dbed4d39a2bce2214ed0bf9490836f18",
+        "control/include/app_config.h": "bfcb52271b7c2fff368120a1f31bbea1a272282574a5b4a0cce399d299795fcc",
         "control/include/bno_reader.h": "6f53c6a876cbf51b74770eca0ffb6c5b215f539f12071f5ec2511f5091a407d4",
         "control/include/control_state.h": "49af045b0deceacf45cba29d521db5e10698f449a8624e15293f54e19a65bc38",
         "control/include/data_types.h": "e7d15006f276d7cd66ec76272e6f4f5e46b0687b62efad0ef68dd48ae6becae9",
@@ -95,7 +104,7 @@
         "control/lib/production_control/src/competition_actuators.cpp": "970b2d55314d10dfb08b57bc21a401d6c3a8e154e7d40487d9304f59eec3d982",
         "control/lib/production_control/src/competition_actuators.h": "f2ee8afa44bebd90c4adb2d216b2be54bb04d125f14ba9b5c2b6743832da5f10",
         "control/lib/production_control/src/production_control.cpp": "5cbc87bd0c218507eb10dabd37a055525dceaa860bbc1bfd6091e5ae86f30066",
-        "control/lib/production_control/src/production_control.h": "0e6cbb90d1d535a51dc1ce4b8384a9b2cc451087190c7f3e66fa5126179b41a6",
+        "control/lib/production_control/src/production_control.h": "175511907f927ceb8e6e5c022df66c3e7c29566a63f3869ca533418d253ba14f",
         "control/platformio.ini": "7f0ca42692be1baa8c53099249ab3fd3d29232a6df1fdf7f2fb58e2fb0173f68",
         "control/src/bno_reader.cpp": "1d8236d16280d992d2e227866b6985bfb03252a16c4421d55251235af8bfd7a5",
         "control/src/control_state.cpp": "a8d507942705325882a11effa5c2fa7718642f7897ab84e3d9f1aff5fe45a4b8",
@@ -184,7 +193,17 @@
         "tests/stubs/esp_system.h": "d3b36199a620cd964a199f9a4414d3cd804f7a404f807a34741b33003f1ca032",
         "tests/stubs/esp_timer.h": "3167364ac25db27eb57aefcb67f6826f760a821dc42f356dbbe19304df0bed0d"
       },
-      "designation": "使用者が2日目の使用版として指定"
+      "designation": "使用者が2日目の使用版として指定",
+      "variant": "used-day2-duty100-v1",
+      "usage_correction": {
+        "id": "auto-duty-100-v1",
+        "files": [
+          "control/include/app_config.h",
+          "control/lib/production_control/src/production_control.h"
+        ],
+        "automatic_request": 1.0,
+        "basis": "使用者が両日とも自動航行でDuty 100%になる設定を使用したと確認"
+      }
     }
   },
   "original_snapshot_commit": "967078e9f81f197baa01762bd0e5bcfee75d9661",

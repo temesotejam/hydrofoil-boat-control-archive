@@ -2,6 +2,7 @@ from pathlib import Path
 import os,subprocess,tempfile
 from verify_archive import ROOT,verify
 verify()
+subprocess.run(['python',str(ROOT/'scripts/test_auto_duty.py')],check=True)
 subprocess.run(['python',str(ROOT/'day1/verification/run.py')],check=True)
 subprocess.run(['node',str(ROOT/'day1/verification/ui_test.js')],check=True)
 for day in ('day2',):

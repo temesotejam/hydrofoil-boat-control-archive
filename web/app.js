@@ -1,5 +1,5 @@
 'use strict';
-const versions={day1:{label:'1日目',commit:'88bed77ee1779f9e76afa91d313e38ace85177a6',variant:'used-day1-v1'},day2:{label:'2日目',commit:'0820d1d1c2107609c839bf6cc5d8c42f9d56e982',variant:''}};
+const versions={day1:{label:'1日目',commit:'88bed77ee1779f9e76afa91d313e38ace85177a6',variant:'used-day1-duty100-v1'},day2:{label:'2日目',commit:'0820d1d1c2107609c839bf6cc5d8c42f9d56e982',variant:'used-day2-duty100-v1'}};
 let buildInfo=null;
 const byId=id=>document.getElementById(id);
 function update(){
@@ -8,7 +8,7 @@ function update(){
  byId('selected-label').textContent=version.label;
  byId('download-all').textContent=version.label+'のプログラムZIP（2台分）';
  for(const [id,kind] of [['download-all','program'],['download-control','control'],['download-communication','communication']])byId(id).href='./downloads/hydrofoil-'+day+'-'+kind+'.zip';
- byId('source-commit').textContent='選択中の保存版：'+version.commit+(version.variant?' / '+version.variant:'');
+ byId('source-commit').textContent='選択中の保存版：'+version.commit+(version.variant?' / '+version.variant:'used-day2-duty100-v1');
  const container=byId('installers');container.replaceChildren();
  if(!buildInfo){container.hidden=true;return;}
  container.hidden=false;
@@ -35,7 +35,7 @@ document.querySelectorAll('input[name="day"]').forEach(input=>input.addEventList
    for(const node of ['control','communication']){
     if(!/^[0-9a-f]{64}$/.test(info.versions[day].firmware?.[node]||''))throw Error('firmware hash');
     const manifestResponse=await fetch('./'+day+'/'+node+'.json');if(!manifestResponse.ok)throw Error('manifest');
-    const manifest=await manifestResponse.json();if(manifest.version!==versions[day].commit.slice(0,7)+(versions[day].variant?'-'+versions[day].variant:''))throw Error('manifest version');
+    const manifest=await manifestResponse.json();if(manifest.version!==versions[day].commit.slice(0,7)+(versions[day].variant?'-'+versions[day].variant:'used-day2-duty100-v1'))throw Error('manifest version');
    }
   }
   buildInfo=info;byId('build-status').textContent='両日の書き込み用ファイルを確認しました。対象基板のボタンを選んでください。';update();

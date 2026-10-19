@@ -6,7 +6,7 @@ from verify_archive import ROOT,verify
 def zip_sources(day,version,nodes,out):
  name='hydrofoil-'+day+('-'+nodes[0] if len(nodes)==1 else '-program')
  text=f'''水中翼ボート {version['label']} プログラム\n保存元: https://github.com/temesotejam/hydrofoil-boat-control-archive\n保存版の参照コミット: {version['commit']}\n\n通信側と制御側は同じ日の版を組み合わせてください。\nC++の改行・インデント・空白を整えています。platformio.iniは原典のままです。\n'''
- text+='両日とも全11点の大会コースと円弧上の通過点生成に対応します。\n'
+ text+='両日とも全11点の大会コースと円弧上の通過点生成に対応します。自動航行の基準要求は100%です。最大Dutyを1.00にすると、制限がなければ加速後に目標Dutyが100%になります。\n'
  if day=='day1':text+='1日目：地磁気を使うIMU方位で操舵、制御出力LPFなし、状態通知100 ms。\n'
  else:text+='2日目：GNSS位置変化の移動方向で操舵、制御出力LPFあり、状態通知2秒。\n'
  for node in nodes:

@@ -75,7 +75,7 @@ constexpr float kCompetitionKpPitch = 0.80f, kCompetitionKdPitch = 0.10f,
 // The GNSS track estimator below is retained for diagnostics only.
 constexpr bool kEnableYawControl = true;
 constexpr float kCompetitionKpYaw = 0.90f, kCompetitionKdYaw = 0.12f;
-constexpr float kCompetitionTargetHeightM = 0.45f, kCompetitionAutoPropulsion = 0.55f,
+constexpr float kCompetitionTargetHeightM = 0.45f, kCompetitionAutoPropulsion = 1.0f,
                 kCompetitionWaypointReachM = 1.5f, kCompetitionLosLookaheadM = 4.0f;
 // GNSS course is calculated from an end-to-end window of successive fixes.
 // It must cover real movement before automated yaw is allowed.

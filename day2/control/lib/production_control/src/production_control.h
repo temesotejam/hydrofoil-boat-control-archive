@@ -119,7 +119,7 @@ struct Config {
   float kpHeight = .75f, kpYaw = .90f, kdYaw = .12f;
   float targetPitch = 0, targetRoll = 0, targetHeightM = .45f;
   float attitudeServoLimit = .50f;
-  float autoPropulsion = .55f, slewPerStep = .04f, waypointReachM = 1.5f;
+  float autoPropulsion = 1.0f, slewPerStep = .04f, waypointReachM = 1.5f;
   float losLookaheadM = 4.0f, minCourseSpeedMps = .5f;
   // Competition-course settings mirror waypoint_drift_los_goal_time_sim.
   // They are deliberately isolated from the normal one-point LOS mode.
