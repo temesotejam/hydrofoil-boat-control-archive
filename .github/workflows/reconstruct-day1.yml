@@ -1,0 +1,33 @@
+name: Verify day1 reconstruction candidate
+on:
+  push:
+    branches: [reconstruct/day1-candidate]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Check navigation, no LPF, IMU faults and UI parameters
+        run: |
+          python reconstruction/day1/verification/run.py
+          node reconstruction/day1/verification/ui_test.js
+      - name: Install PlatformIO
+        run: python -m pip install platformio==6.1.19
+      - name: Build communication and control boards
+        run: |
+          python -m platformio run -d reconstruction/day1/communication -e production
+          python -m platformio run -d reconstruction/day1/control -e production
+      - uses: actions/upload-artifact@v7
+        with:
+          name: day1-reconstruction-build
+          path: |
+            reconstruction/day1/control/.pio/build/production/firmware.bin
+            reconstruction/day1/communication/.pio/build/production/firmware.bin
