@@ -7,14 +7,14 @@
       "commit": "bf8067c35ee56c884bfbd16e277b27db6e72ef98",
       "sha256": {
         "communication/include/app_config.h": "8d1905b578ceea947b3b02943fa13ad901fc1181672d6240288e415064d1be03",
-        "communication/include/fixed_waypoints.h": "06292531e1b63a090047013ece381a12da870706a9fcec03d4e389fd36bcfb7e",
+        "communication/include/fixed_waypoints.h": "a9a55e16ea53aa99419a9a98ddc73467397537cf24c82c295340ab8337d1a73b",
         "communication/include/gnss_receiver.h": "c26df09d9b0faeb8ea53bd318ea52815b1dbc043680ad2e65a1385aece3f27bf",
-        "communication/include/production_page_ja.h": "eeecad8699f48470c3a246101e43327f8ba2a5d0d055d035189226ae7beb709e",
+        "communication/include/production_page_ja.h": "71442133bd5c4f4ca47cbccf3d1c6486ab13c7441daf894ee24d191987b0ef35",
         "communication/lib/boat_protocol/src/boat_protocol.cpp": "df934a34a1fe5c8ff37215013be0affa027503fb398f407cb0c889993d2a8eb2",
         "communication/lib/boat_protocol/src/boat_protocol.h": "9f8e3a465ada18da38bf7c64d48977080459c52040c32e3ff3e776c516510d20",
         "communication/platformio.ini": "e83634214fb3c1efcad62762b3580762abbc5523d5db0e0bfb43e3057481032e",
         "communication/src/gnss_receiver.cpp": "2ec12ff1e977c15a1c5f1267daeb8ed67d97493f4189878e103c94aa6745a84f",
-        "communication/src/main.cpp": "aa845fcb8d40e7267907df3446d2522b5e63c8ad4da442a65f497733d0fd453d",
+        "communication/src/main.cpp": "d49b52db2476f71c305e3fc44c5e5bb751c2066399ccb2009ac6ed80a4e3fad2",
         "control/include/app_config.h": "cd1144ff1c07bddc660e21f68a66081452fa2410751a61f65dd2fc16975a384f",
         "control/include/bno_reader.h": "6f53c6a876cbf51b74770eca0ffb6c5b215f539f12071f5ec2511f5091a407d4",
         "control/include/control_state.h": "49af045b0deceacf45cba29d521db5e10698f449a8624e15293f54e19a65bc38",
@@ -118,6 +118,18 @@
         "tests/stubs/WiFi.h": "2e0dfc7543d7bc8b65fed107f109ce60db7eb2ae9f5f52cef4b975af8ea8bba8",
         "tests/stubs/esp_system.h": "d3b36199a620cd964a199f9a4414d3cd804f7a404f807a34741b33003f1ca032",
         "tests/stubs/esp_timer.h": "3167364ac25db27eb57aefcb67f6826f760a821dc42f356dbbe19304df0bed0d"
+      },
+      "adaptation": {
+        "id": "course-preset-v1",
+        "description": "Operator-confirmed full-course preset added to the day1 base; not an untouched historical snapshot.",
+        "base_commit": "730ac2e45db4f28c0d938145ac181ba710b35a7e",
+        "patch": "scripts/day1_preset.patch",
+        "patch_sha256": "35d10f29dd78ec92502f51bddcce9aa016e71c7fb2be72450d8a0f0a5d458bac",
+        "files": [
+          "communication/include/fixed_waypoints.h",
+          "communication/src/main.cpp",
+          "communication/include/production_page_ja.h"
+        ]
       }
     },
     "day2": {

@@ -11,7 +11,7 @@
 
 原典： https://github.com/temesotejam/2026_8_6
 
-各日の`control/`、`communication/`、`tests/`は、原典の該当コミットに対してC++の改行・インデント・空白を整えています。処理・設定値・文字列は変更していません。`archive.json`に原典と整形後のSHA-256を記録し、ビルド時に原典とのトークン一致（コメント・空白を除いたコードの一致）も検証します。整形前のファイルは[元の保存版](https://github.com/temesotejam/hydrofoil-boat-control-archive/tree/967078e9f81f197baa01762bd0e5bcfee75d9661)に残しています。保存版のため、報告書で指摘した2日目の始動確認の時間設定も修正していません。機器内の操作画面も原典のままです。
+各日の`control/`、`communication/`、`tests/`は、原典の該当コミットに対してC++の改行・インデント・空白を整えています。1日目の通信側は「大会コース」の全11点をまとめて送信し、既存の制御側が順に追従します。単一目標の選択も利用できます。状態通知周期・開始確認期限・姿勢推定・制御側の処理は1日目の設定を維持しています。`archive.json`に原典と整形後のSHA-256を記録し、ビルド時に原典とのトークン一致も検証します。1日目通信側のプリセットに関する3ファイルは、記録した差分を適用した結果と完全一致することを別に検証します。整形前のファイルは[元の保存版](https://github.com/temesotejam/hydrofoil-boat-control-archive/tree/967078e9f81f197baa01762bd0e5bcfee75d9661)に残しています。保存版のため、報告書で指摘した2日目の始動確認の時間設定も修正していません。1日目の操作画面には大会コースの選択肢があります。
 
 ## ブラウザから書き込む
 
@@ -46,13 +46,14 @@ python -m platformio run -d day2/control -e production
 python -m platformio run -d day2/communication -e production
 ```
 
-ソースの処理と設定値、`platformio.ini`は原典のままです。特に制御側のSparkFun VL53L5CXライブラリは原典で版指定がないため、再ビルドしたバイナリが当日使用したバイナリと完全一致することは保証できません。書き込み用マニフェストには、リポジトリの更新番号ではなく各日の原典コミットを表示します。
+`platformio.ini`は原典のままです。1日目の大会コースはA→B→C→D→E→F→G→H→C→B→Aです。通信は1日目の既存形式（action=1）を使い、2日目専用のゲート生成処理は取り込みません。特に制御側のSparkFun VL53L5CXライブラリは原典で版指定がないため、再ビルドしたバイナリが当日使用したバイナリと完全一致することは保証できません。書き込み用マニフェストには、リポジトリの更新番号ではなく各日の原典コミットと、1日目ではプリセット対応の識別子を表示します。
 
 ## 検証とページ生成
 
 ```sh
 python scripts/verify_archive.py
 python scripts/host_tests.py
+python scripts/test_day1_preset.py
 python scripts/build_site.py
 ```
 

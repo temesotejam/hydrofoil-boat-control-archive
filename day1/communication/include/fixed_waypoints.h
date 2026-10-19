@@ -25,6 +25,12 @@ constexpr Point kPoints[] = {
 
 constexpr size_t kCount = sizeof(kPoints) / sizeof(kPoints[0]);
 
+// Full-course preset confirmed by the operator; retain day1's action=1 protocol.
+constexpr uint8_t kCompetitionRouteIndices[] = {0, 1, 2, 3, 4, 5, 6, 7, 2, 1, 0};
+constexpr size_t kCompetitionRouteCount =
+    sizeof(kCompetitionRouteIndices) / sizeof(kCompetitionRouteIndices[0]);
+static_assert(kCompetitionRouteCount <= 16, "Waypoint packet capacity");
+
 inline const Point *byIndex(uint8_t index) {
   return index < kCount ? &kPoints[index] : nullptr;
 }
