@@ -1,5 +1,5 @@
 from pathlib import Path
-import subprocess,tempfile
+import os,subprocess,tempfile
 from verify_archive import ROOT,verify
 verify()
 for day in ('day1','day2'):
@@ -11,7 +11,7 @@ for day in ('day1','day2'):
     print('day2: original controller_test.cpp targets an older ServoTuning API; preserved unchanged, not counted as passed')
     subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Icontrol/lib/production_control/src','-fsyntax-only','control/lib/production_control/src/production_control.cpp','control/lib/production_control/src/competition_actuators.cpp'],cwd=cwd,check=True)
     continue
-   exe=str(Path(temp)/name)
+   exe=str(Path(temp)/(name+('.exe' if os.name=='nt' else '')))
    subprocess.run(['g++','-std=c++17','-Wall','-Wextra',*(['-Werror'] if day=='day1' else []),*args,'-o',exe],cwd=cwd,check=True)
    subprocess.run([exe],cwd=cwd,check=True)
   if day=='day1':

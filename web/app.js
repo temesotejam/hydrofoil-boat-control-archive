@@ -1,5 +1,5 @@
 'use strict';
-const versions={day1:{label:'1日目',commit:'bf8067c35ee56c884bfbd16e277b27db6e72ef98'},day2:{label:'2日目',commit:'0820d1d1c2107609c839bf6cc5d8c42f9d56e982'}};
+const versions={day1:{label:'1日目',commit:'bf8067c35ee56c884bfbd16e277b27db6e72ef98',variant:'course-preset-v1'},day2:{label:'2日目',commit:'0820d1d1c2107609c839bf6cc5d8c42f9d56e982',variant:''}};
 let buildInfo=null;
 const byId=id=>document.getElementById(id);
 function update(){
@@ -8,7 +8,7 @@ function update(){
  byId('selected-label').textContent=version.label;
  byId('download-all').textContent=version.label+'のプログラムZIP（2台分）';
  for(const [id,kind] of [['download-all','program'],['download-control','control'],['download-communication','communication']])byId(id).href='./downloads/hydrofoil-'+day+'-'+kind+'.zip';
- byId('source-commit').textContent='選択中の原典コミット：'+version.commit;
+ byId('source-commit').textContent='選択中の原典コミット：'+version.commit+(version.variant?' / '+version.variant:'');
  const container=byId('installers');container.replaceChildren();
  if(!buildInfo){container.hidden=true;return;}
  container.hidden=false;
@@ -31,11 +31,11 @@ document.querySelectorAll('input[name="day"]').forEach(input=>input.addEventList
   const response=await fetch('./build-info.json',{cache:'no-store'});if(!response.ok)throw Error('build-info');
   const info=await response.json();if(!info.ready)throw Error('not ready');
   for(const day of Object.keys(versions)){
-   if(info.versions?.[day]?.commit!==versions[day].commit)throw Error('version mismatch');
+   if(info.versions?.[day]?.commit!==versions[day].commit || (info.versions[day].variant||'')!==versions[day].variant)throw Error('version mismatch');
    for(const node of ['control','communication']){
     if(!/^[0-9a-f]{64}$/.test(info.versions[day].firmware?.[node]||''))throw Error('firmware hash');
     const manifestResponse=await fetch('./'+day+'/'+node+'.json');if(!manifestResponse.ok)throw Error('manifest');
-    const manifest=await manifestResponse.json();if(manifest.version!==versions[day].commit.slice(0,7))throw Error('manifest version');
+    const manifest=await manifestResponse.json();if(manifest.version!==versions[day].commit.slice(0,7)+(versions[day].variant?'-'+versions[day].variant:''))throw Error('manifest version');
    }
   }
   buildInfo=info;byId('build-status').textContent='両日の書き込み用ファイルを確認しました。対象基板のボタンを選んでください。';update();

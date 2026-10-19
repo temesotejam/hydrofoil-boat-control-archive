@@ -35,6 +35,7 @@ button{min-height:48px;border:0;border-radius:8px;font:700 16px system-ui}button
       </div>
       <label class="output" for="target">固定ウェイポイント</label>
       <select id="target">
+        <option value="course" selected>大会コース — A → B → C → D → E → F → G → H → C → B → A</option>
         <option value="0">A — 35.45327, 136.07198</option>
         <option value="1">B — 35.44437, 136.07399</option>
         <option value="2">C — 35.43214, 136.07628</option>
@@ -96,7 +97,7 @@ function renderButtons(){
 function render(state){
   latest=state;const connection=get('connection');
   const locked=!['idle','error'].includes(state.operation);
-  if(!selectionInitialized||locked){get('waypoint-enable').checked=Boolean(state.selection.waypoint);get('attitude-enable').checked=Boolean(state.selection.attitude);get('target').value=String(state.selection.target_index);selectionInitialized=true;modeHint()}
+  if(!selectionInitialized||locked){get('waypoint-enable').checked=Boolean(state.selection.waypoint);get('attitude-enable').checked=Boolean(state.selection.attitude);get('target').value=state.selection.competition_course?'course':String(state.selection.target_index);selectionInitialized=true;modeHint()}
   if(!state.connected){connection.className='status bad';connection.textContent=state.ever_received?'XIAOとの通信が切れています':'XIAOを待っています'}
   else if(!state.actuators.pca_ready){connection.className='status bad';connection.textContent='XIAO接続済み・PCA9685未接続'}
   else{const wpSelected=get('waypoint-enable').checked,fix=state.gnss.communication_valid&&state.gnss.control_valid;connection.className=!wpSelected||fix?'status ok':'status';connection.textContent='制御側XIAO '+state.control.safety_name+' / '+(wpSelected?('GNSS '+(fix?'FIX':'WAIT')+' / 衛星 '+state.gnss.satellites):('GNSS不要 / 衛星 '+state.gnss.satellites))+' / SD '+(state.storage.sd_ready?'OK':'未認識')}

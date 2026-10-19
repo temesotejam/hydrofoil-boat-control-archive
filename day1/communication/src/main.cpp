@@ -95,6 +95,7 @@ struct ManualValues {
 struct OperationConfig {
   bool waypointEnabled = false;
   bool attitudeEnabled = false;
+  bool competitionCourse = false;
   uint8_t targetIndex = 0;
   uint8_t mode = boat::ControlManual;
 };
@@ -482,7 +483,7 @@ void beginModeCommand() {
 
 void beginWaypointCommand() {
   const fixed_waypoints::Point *point = fixed_waypoints::byIndex(operation.targetIndex);
-  if (!point) {
+  if (!operation.competitionCourse && !point) {
     pending.active = false;
     setMessage("固定ウェイポイントの選択が不正です。");
     return;
@@ -491,10 +492,17 @@ void beginWaypointCommand() {
   command.requestId = requestIdNext++;
   command.revision = waypointRevisionNext++;
   command.action = 1;
-  command.count = 1;
+  command.count = operation.competitionCourse
+                      ? static_cast<uint8_t>(fixed_waypoints::kCompetitionRouteCount)
+                      : 1;
   command.reachRadiusM = kWaypointReachRadiusM;
-  command.points[0].latitudeDeg = point->latitudeDeg;
-  command.points[0].longitudeDeg = point->longitudeDeg;
+  for (uint8_t i = 0; i < command.count; ++i) {
+    const auto *source = operation.competitionCourse
+                             ? fixed_waypoints::byIndex(fixed_waypoints::kCompetitionRouteIndices[i])
+                             : point;
+    command.points[i].latitudeDeg = source->latitudeDeg;
+    command.points[i].longitudeDeg = source->longitudeDeg;
+  }
   command.canonicalCrc =
       boat::canonicalCrc(&command, offsetof(boat::WaypointSetPayload, canonicalCrc));
   beginPending(
@@ -731,7 +739,7 @@ void serviceOperation() {
       keepManualFresh();
     if (usesWaypoint() && safety == 1 && cache.sawFinalWaypoint) {
       sendManualOff();
-      setStage(Stage::Idle, "選択した固定ウェイポイントへ到着し、全出力を停止しました。");
+      setStage(Stage::Idle, "設定した経路の最終ウェイポイントへ到着し、全出力を停止しました。");
     } else if (safety != 3) {
       failSafetyOperation(cache, "RUNNING");
     }
@@ -887,6 +895,12 @@ bool parseOperationConfig(OperationConfig &config) {
       !parseBooleanArgument("attitude", config.attitudeEnabled))
     return false;
   const String target = web.arg("target");
+  config.competitionCourse = target == "course";
+  if (config.competitionCourse) {
+    config.targetIndex = 0;
+    config.mode = selectedMode(config.waypointEnabled, config.attitudeEnabled);
+    return true;
+  }
   char *end = nullptr;
   const long index = strtol(target.c_str(), &end, 10);
   if (!target.length() || !end || *end || index < 0 ||
@@ -1014,13 +1028,14 @@ void apiStatus() {
   const uint8_t safety = currentSafety(cache);
   const auto &fix = gnssRx.latest();
   const fixed_waypoints::Point *target = fixed_waypoints::byIndex(operation.targetIndex);
+  char targetName[2] = {target ? target->name : '?', '\0'};
   char body[2300];
   snprintf(body,
            sizeof(body),
            "{\"connected\":%s,\"ever_received\":%s,\"age_ms\":%lu,"
            "\"operation\":\"%s\",\"message\":\"%s\","
            "\"selection\":{\"waypoint\":%s,\"attitude\":%s,\"target_index\":%u,"
-           "\"target_name\":\"%c\",\"mode\":%u,\"mode_name\":\"%s\"},"
+           "\"target_name\":\"%s\",\"competition_course\":%s,\"mode\":%u,\"mode_name\":\"%s\"},"
            "\"manual\":{\"enabled_mask\":%u,\"left\":%.3f,\"right\":%.3f,"
            "\"rear\":%.3f,\"propulsion\":%.3f},"
            "\"gnss\":{\"communication_valid\":%s,\"control_valid\":%u,\"age_ms\":%lu,"
@@ -1047,7 +1062,8 @@ void apiStatus() {
            operation.waypointEnabled ? "true" : "false",
            operation.attitudeEnabled ? "true" : "false",
            static_cast<unsigned>(operation.targetIndex),
-           target ? target->name : '?',
+           operation.competitionCourse ? "COURSE" : targetName,
+           operation.competitionCourse ? "true" : "false",
            static_cast<unsigned>(operation.mode),
            modeName(operation.mode),
            static_cast<unsigned>(kAllManualMask),
